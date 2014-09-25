@@ -15,16 +15,14 @@
  */
 package com.gitblit.git;
 
-import javax.servlet.http.HttpServletRequest;
-
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.transport.UploadPack;
 import org.eclipse.jgit.transport.resolver.ServiceNotAuthorizedException;
 import org.eclipse.jgit.transport.resolver.ServiceNotEnabledException;
 import org.eclipse.jgit.transport.resolver.UploadPackFactory;
 
-import com.gitblit.GitBlit;
-import com.gitblit.models.UserModel;
+import com.gitblit.manager.IAuthenticationManager;
+import com.gitblit.transport.git.GitDaemonClient;
 
 /**
  * The upload pack factory creates an upload pack which controls what refs are
@@ -36,20 +34,19 @@ import com.gitblit.models.UserModel;
  */
 public class GitblitUploadPackFactory<X> implements UploadPackFactory<X> {
 
+	private final IAuthenticationManager authenticationManager;
+
+	public GitblitUploadPackFactory(IAuthenticationManager authenticationManager) {
+		this.authenticationManager = authenticationManager;
+	}
+
 	@Override
 	public UploadPack create(X req, Repository db)
 			throws ServiceNotEnabledException, ServiceNotAuthorizedException {
 
-		UserModel user = UserModel.ANONYMOUS;
 		int timeout = 0;
 
-		if (req instanceof HttpServletRequest) {
-			// http/https request may or may not be authenticated
-			user = GitBlit.self().authenticate((HttpServletRequest) req);
-			if (user == null) {
-				user = UserModel.ANONYMOUS;
-			}
-		} else if (req instanceof GitDaemonClient) {
+		if (req instanceof GitDaemonClient) {
 			// git daemon request is always anonymous
 			GitDaemonClient client = (GitDaemonClient) req;
 			// set timeout from Git daemon

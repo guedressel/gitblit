@@ -32,11 +32,10 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 
-import com.gitblit.BranchGraphServlet;
 import com.gitblit.Constants;
-import com.gitblit.GitBlit;
 import com.gitblit.Keys;
 import com.gitblit.models.RefModel;
+import com.gitblit.servlet.BranchGraphServlet;
 import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
 import com.gitblit.wicket.ExternalImage;
@@ -57,7 +56,7 @@ public class LogPanel extends BasePanel {
 			Repository r, int limit, int pageOffset, boolean showRemoteRefs) {
 		super(wicketId);
 		boolean pageResults = limit <= 0;
-		int itemsPerPage = GitBlit.getInteger(Keys.web.itemsPerPage, 50);
+		int itemsPerPage = app().settings().getInteger(Keys.web.itemsPerPage, 50);
 		if (itemsPerPage <= 1) {
 			itemsPerPage = 50;
 		}
@@ -77,7 +76,7 @@ public class LogPanel extends BasePanel {
 		hasMore = commits.size() >= itemsPerPage;
 
 		final String baseUrl = WicketUtils.getGitblitURL(getRequest());
-		final boolean showGraph = GitBlit.getBoolean(Keys.web.showBranchGraph, true);
+		final boolean showGraph = app().settings().getBoolean(Keys.web.showBranchGraph, true);
 
 		MarkupContainer graph = new WebMarkupContainer("graph");
 		add(graph);
@@ -101,7 +100,7 @@ public class LogPanel extends BasePanel {
 					WicketUtils.newRepositoryParameter(repositoryName)));
 		}
 
-		final int hashLen = GitBlit.getInteger(Keys.web.shortCommitIdLength, 6);
+		final int hashLen = app().settings().getInteger(Keys.web.shortCommitIdLength, 6);
 		ListDataProvider<RevCommit> dp = new ListDataProvider<RevCommit>(commits);
 		DataView<RevCommit> logView = new DataView<RevCommit>("commit", dp) {
 			private static final long serialVersionUID = 1L;
@@ -111,6 +110,7 @@ public class LogPanel extends BasePanel {
 			public void populateItem(final Item<RevCommit> item) {
 				final RevCommit entry = item.getModelObject();
 				final Date date = JGitUtils.getCommitDate(entry);
+				final boolean isMerge = entry.getParentCount() > 1;
 
 				item.add(WicketUtils.createDateLabel("commitDate", date, getTimeZone(), getTimeUtils()));
 
@@ -118,12 +118,12 @@ public class LogPanel extends BasePanel {
 				String author = entry.getAuthorIdent().getName();
 				LinkPanel authorLink = new LinkPanel("commitAuthor", "list", author,
 						GitSearchPage.class, WicketUtils.newSearchParameter(repositoryName,
-								objectId, author, Constants.SearchType.AUTHOR));
+								null, author, Constants.SearchType.AUTHOR));
 				setPersonSearchTooltip(authorLink, author, Constants.SearchType.AUTHOR);
 				item.add(authorLink);
 
 				// merge icon
-				if (entry.getParentCount() > 1) {
+				if (isMerge) {
 					item.add(WicketUtils.newImage("commitIcon", "commit_merge_16x16.png"));
 				} else {
 					item.add(WicketUtils.newBlankImage("commitIcon"));
@@ -137,7 +137,7 @@ public class LogPanel extends BasePanel {
 				} else {
 					trimmedMessage = StringUtils.trimString(shortMessage, Constants.LEN_SHORTLOG);
 				}
-				LinkPanel shortlog = new LinkPanel("commitShortMessage", "list subject",
+				LinkPanel shortlog = new LinkPanel("commitShortMessage", "list subject" + (isMerge ? " merge" : ""),
 						trimmedMessage, CommitPage.class, WicketUtils.newObjectParameter(
 								repositoryName, entry.getName()));
 				if (!shortMessage.equals(trimmedMessage)) {

@@ -15,12 +15,6 @@
  */
 package com.gitblit.tests;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
@@ -57,7 +51,7 @@ import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.JnaUtils;
 import com.gitblit.utils.StringUtils;
 
-public class JGitUtilsTest {
+public class JGitUtilsTest extends GitblitUnitTest {
 
 	@Test
 	public void testDisplayName() throws Exception {
@@ -426,6 +420,11 @@ public class JGitUtilsTest {
 		String contentA = JGitUtils.getStringContent(repository, (RevTree) null, "java.java");
 		RevCommit commit = JGitUtils.getCommit(repository, Constants.HEAD);
 		String contentB = JGitUtils.getStringContent(repository, commit.getTree(), "java.java");
+
+		assertTrue("ContentA is null!", contentA != null && contentA.length() > 0);
+		assertTrue("ContentB is null!", contentB != null && contentB.length() > 0);
+		assertTrue(contentA.equals(contentB));
+
 		String contentC = JGitUtils.getStringContent(repository, commit.getTree(), "missing.txt");
 
 		// manually construct a blob, calculate the hash, lookup the hash in git
@@ -435,9 +434,6 @@ public class JGitUtilsTest {
 		String sha1 = StringUtils.getSHA1(sb.toString());
 		String contentD = JGitUtils.getStringContent(repository, sha1);
 		repository.close();
-		assertTrue("ContentA is null!", contentA != null && contentA.length() > 0);
-		assertTrue("ContentB is null!", contentB != null && contentB.length() > 0);
-		assertTrue(contentA.equals(contentB));
 		assertNull(contentC);
 		assertTrue(contentA.equals(contentD));
 	}
@@ -524,7 +520,7 @@ public class JGitUtilsTest {
 		// grab the commits since 2008-07-15
 		commits = JGitUtils.getRevLog(repository, null,
 				new SimpleDateFormat("yyyy-MM-dd").parse("2008-07-15"));
-		assertEquals(12, commits.size());
+		assertEquals(19, commits.size());
 		repository.close();
 	}
 

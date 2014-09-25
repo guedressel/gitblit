@@ -15,7 +15,6 @@
  */
 package com.gitblit.wicket.pages;
 
-import java.text.MessageFormat;
 import java.util.List;
 
 import javax.servlet.http.HttpServletRequest;
@@ -24,7 +23,6 @@ import org.apache.wicket.PageParameters;
 import org.apache.wicket.markup.html.basic.Label;
 import org.apache.wicket.protocol.http.WebRequest;
 
-import com.gitblit.GitBlit;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.RepositoryUrl;
 import com.gitblit.models.UserModel;
@@ -33,7 +31,7 @@ import com.gitblit.wicket.GitblitRedirectException;
 import com.gitblit.wicket.WicketUtils;
 import com.gitblit.wicket.panels.RepositoryUrlPanel;
 
-public class EmptyRepositoryPage extends RootPage {
+public class EmptyRepositoryPage extends RepositoryPage {
 
 	public EmptyRepositoryPage(PageParameters params) {
 		super(params);
@@ -41,7 +39,7 @@ public class EmptyRepositoryPage extends RootPage {
 		setVersioned(false);
 
 		String repositoryName = WicketUtils.getRepositoryName(params);
-		RepositoryModel repository = GitBlit.self().getRepositoryModel(repositoryName);
+		RepositoryModel repository = app().repositories().getRepositoryModel(repositoryName);
 		if (repository == null) {
 			error(getString("gb.canNotLoadRepository") + " " + repositoryName, true);
 		}
@@ -51,26 +49,27 @@ public class EmptyRepositoryPage extends RootPage {
 			throw new GitblitRedirectException(SummaryPage.class, params);
 		}
 
-		setupPage(repositoryName, getString("gb.emptyRepository"));
-
 		UserModel user = GitBlitWebSession.get().getUser();
 		if (user == null) {
 			user = UserModel.ANONYMOUS;
 		}
 
 		HttpServletRequest req = ((WebRequest) getRequest()).getHttpServletRequest();
-		List<RepositoryUrl> repositoryUrls = GitBlit.self().getRepositoryUrls(req, user, repository);
+		List<RepositoryUrl> repositoryUrls = app().gitblit().getRepositoryUrls(req, user, repository);
 		RepositoryUrl primaryUrl = repositoryUrls.size() == 0 ? null : repositoryUrls.get(0);
 		String url = primaryUrl != null ? primaryUrl.url : "";
 
+		String createSyntax = readResource("create_git.md").replace("${primaryUrl}", url);
+		String existingSyntax = readResource("existing_git.md").replace("${primaryUrl}", url);
+
 		add(new Label("repository", repositoryName));
 		add(new RepositoryUrlPanel("pushurl", false, user, repository));
-		add(new Label("cloneSyntax", MessageFormat.format("git clone {0}", url)));
-		add(new Label("remoteSyntax", MessageFormat.format("git remote add gitblit {0}\ngit push gitblit master", url)));
+		add(new Label("createSyntax", createSyntax));
+		add(new Label("existingSyntax", existingSyntax));
 	}
 
 	@Override
-	protected Class<? extends BasePage> getRootNavPageClass() {
-		return RepositoriesPage.class;
+	protected String getPageName() {
+		return getString("gb.summary");
 	}
 }

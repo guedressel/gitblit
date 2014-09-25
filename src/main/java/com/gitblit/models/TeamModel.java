@@ -27,9 +27,9 @@ import java.util.Set;
 
 import com.gitblit.Constants.AccessPermission;
 import com.gitblit.Constants.AccessRestrictionType;
+import com.gitblit.Constants.AccountType;
 import com.gitblit.Constants.PermissionType;
 import com.gitblit.Constants.RegistrantType;
-import com.gitblit.Constants.Unused;
 import com.gitblit.utils.StringUtils;
 
 /**
@@ -48,6 +48,7 @@ public class TeamModel implements Serializable, Comparable<TeamModel> {
 	public boolean canAdmin;
 	public boolean canFork;
 	public boolean canCreate;
+	public AccountType accountType;
 	public final Set<String> users = new HashSet<String>();
 	// retained for backwards-compatibility with RPC clients
 	@Deprecated
@@ -59,37 +60,8 @@ public class TeamModel implements Serializable, Comparable<TeamModel> {
 
 	public TeamModel(String name) {
 		this.name = name;
+		this.accountType = AccountType.LOCAL;
 	}
-
-	/**
-	 * @use hasRepositoryPermission
-	 * @param name
-	 * @return
-	 */
-	@Deprecated
-	@Unused
-	public boolean hasRepository(String name) {
-		return hasRepositoryPermission(name);
-	}
-
-	@Deprecated
-	@Unused
-	public void addRepository(String name) {
-		addRepositoryPermission(name);
-	}
-
-	@Deprecated
-	@Unused
-	public void addRepositories(Collection<String> names) {
-		addRepositoryPermissions(names);
-	}
-
-	@Deprecated
-	@Unused
-	public void removeRepository(String name) {
-		removeRepositoryPermission(name);
-	}
-
 
 	/**
 	 * Returns a list of repository permissions for this team.
@@ -356,6 +328,10 @@ public class TeamModel implements Serializable, Comparable<TeamModel> {
 		for (String address:addresses) {
 			mailingLists.add(address.toLowerCase());
 		}
+	}
+
+	public boolean isLocalTeam() {
+		return accountType.isLocal();
 	}
 
 	@Override

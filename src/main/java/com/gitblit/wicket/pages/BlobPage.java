@@ -21,15 +21,16 @@ import java.util.Map;
 
 import org.apache.wicket.Component;
 import org.apache.wicket.PageParameters;
+import org.apache.wicket.RedirectException;
 import org.apache.wicket.markup.html.basic.Label;
 import org.apache.wicket.markup.html.image.Image;
 import org.apache.wicket.markup.html.link.BookmarkablePageLink;
-import org.eclipse.jgit.lib.Constants;
+import org.apache.wicket.markup.html.link.ExternalLink;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 
-import com.gitblit.GitBlit;
 import com.gitblit.Keys;
+import com.gitblit.servlet.RawServlet;
 import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
 import com.gitblit.wicket.CacheControl;
@@ -50,7 +51,11 @@ public class BlobPage extends RepositoryPage {
 
 		Repository r = getRepository();
 		final String blobPath = WicketUtils.getPath(params);
-		String [] encodings = GitBlit.getEncodings();
+		String [] encodings = getEncodings();
+
+		if (StringUtils.isEmpty(objectId) && StringUtils.isEmpty(blobPath)) {
+			throw new RedirectException(TreePage.class, WicketUtils.newRepositoryParameter(repositoryName));
+		}
 
 		if (StringUtils.isEmpty(blobPath)) {
 			// blob by objectid
@@ -59,9 +64,8 @@ public class BlobPage extends RepositoryPage {
 					WicketUtils.newPathParameter(repositoryName, objectId, blobPath))
 					.setEnabled(false));
 			add(new BookmarkablePageLink<Void>("historyLink", HistoryPage.class).setEnabled(false));
-			add(new BookmarkablePageLink<Void>("rawLink", RawPage.class,
-					WicketUtils.newPathParameter(repositoryName, objectId, blobPath)));
-			add(new BookmarkablePageLink<Void>("headLink", BlobPage.class).setEnabled(false));
+			String rawUrl = RawServlet.asLink(getContextUrl(), repositoryName, objectId, blobPath);
+			add(new ExternalLink("rawLink",  rawUrl));
 			add(new CommitHeaderPanel("commitHeader", objectId));
 			add(new PathBreadcrumbsPanel("breadcrumbs", repositoryName, blobPath, objectId));
 			Component c = new Label("blobText", JGitUtils.getStringContent(r, objectId, encodings));
@@ -75,7 +79,7 @@ public class BlobPage extends RepositoryPage {
 			}
 
 			// see if we should redirect to the doc page
-			MarkupProcessor processor = new MarkupProcessor(GitBlit.getSettings());
+			MarkupProcessor processor = new MarkupProcessor(app().settings(), app().xssFilter());
 			for (String ext : processor.getMarkupExtensions()) {
 				if (ext.equals(extension)) {
 					setResponsePage(DocPage.class, params);
@@ -83,18 +87,15 @@ public class BlobPage extends RepositoryPage {
 				}
 			}
 
-			// manually get commit because it can be null
-			RevCommit commit = JGitUtils.getCommit(r, objectId);
+			RevCommit commit = getCommit();
 
 			// blob page links
 			add(new BookmarkablePageLink<Void>("blameLink", BlamePage.class,
 					WicketUtils.newPathParameter(repositoryName, objectId, blobPath)));
 			add(new BookmarkablePageLink<Void>("historyLink", HistoryPage.class,
 					WicketUtils.newPathParameter(repositoryName, objectId, blobPath)));
-			add(new BookmarkablePageLink<Void>("rawLink", RawPage.class,
-					WicketUtils.newPathParameter(repositoryName, objectId, blobPath)));
-			add(new BookmarkablePageLink<Void>("headLink", BlobPage.class,
-					WicketUtils.newPathParameter(repositoryName, Constants.HEAD, blobPath)));
+			String rawUrl = RawServlet.asLink(getContextUrl(), repositoryName, objectId, blobPath);
+			add(new ExternalLink("rawLink", rawUrl));
 
 			add(new CommitHeaderPanel("commitHeader", repositoryName, commit));
 
@@ -102,13 +103,13 @@ public class BlobPage extends RepositoryPage {
 
 			// Map the extensions to types
 			Map<String, Integer> map = new HashMap<String, Integer>();
-			for (String ext : GitBlit.getStrings(Keys.web.prettyPrintExtensions)) {
+			for (String ext : app().settings().getStrings(Keys.web.prettyPrintExtensions)) {
 				map.put(ext.toLowerCase(), 1);
 			}
-			for (String ext : GitBlit.getStrings(Keys.web.imageExtensions)) {
+			for (String ext : app().settings().getStrings(Keys.web.imageExtensions)) {
 				map.put(ext.toLowerCase(), 2);
 			}
-			for (String ext : GitBlit.getStrings(Keys.web.binaryExtensions)) {
+			for (String ext : app().settings().getStrings(Keys.web.binaryExtensions)) {
 				map.put(ext.toLowerCase(), 3);
 			}
 
@@ -121,7 +122,7 @@ public class BlobPage extends RepositoryPage {
 				case 2:
 					// image blobs
 					add(new Label("blobText").setVisible(false));
-					add(new ExternalImage("blobImage", urlFor(RawPage.class, WicketUtils.newPathParameter(repositoryName, objectId, blobPath)).toString()));
+					add(new ExternalImage("blobImage", rawUrl));
 					break;
 				case 3:
 					// binary blobs
@@ -220,6 +221,11 @@ public class BlobPage extends RepositoryPage {
 	@Override
 	protected String getPageName() {
 		return getString("gb.view");
+	}
+
+	@Override
+	protected boolean isCommitPage() {
+		return true;
 	}
 
 	@Override

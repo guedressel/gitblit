@@ -44,11 +44,14 @@ import org.slf4j.LoggerFactory;
 
 import com.gitblit.Constants;
 import com.gitblit.Constants.AccessRestrictionType;
-import com.gitblit.GitBlit;
+import com.gitblit.IStoredSettings;
 import com.gitblit.Keys;
 import com.gitblit.client.Translation;
+import com.gitblit.extensions.ReceiveHook;
+import com.gitblit.manager.IGitblit;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
+import com.gitblit.tickets.BranchTicketService;
 import com.gitblit.utils.ArrayUtils;
 import com.gitblit.utils.ClientLogger;
 import com.gitblit.utils.CommitCache;
@@ -84,18 +87,27 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 
 	protected String gitblitUrl;
 
-	protected String repositoryUrl;
-
 	protected GroovyScriptEngine gse;
 
-	public GitblitReceivePack(Repository db, RepositoryModel repository, UserModel user) {
+	protected final IStoredSettings settings;
+
+	protected final IGitblit gitblit;
+
+	public GitblitReceivePack(
+			IGitblit gitblit,
+			Repository db,
+			RepositoryModel repository,
+			UserModel user) {
+
 		super(db);
+		this.settings = gitblit.getSettings();
+		this.gitblit = gitblit;
 		this.repository = repository;
-		this.user = user == null ? UserModel.ANONYMOUS : user;
-		this.groovyDir = GitBlit.getGroovyScriptsFolder();
+		this.user = user;
+		this.groovyDir = gitblit.getHooksFolder();
 		try {
 			// set Grape root
-			File grapeRoot = GitBlit.getFileOrFolder(Keys.groovy.grapeFolder, "${baseFolder}/groovy/grape").getAbsoluteFile();
+			File grapeRoot = gitblit.getGrapesFolder();
 			grapeRoot.mkdirs();
 			System.setProperty("grape.root", grapeRoot.getAbsolutePath());
 			this.gse = new GroovyScriptEngine(groovyDir.getAbsolutePath());
@@ -107,9 +119,46 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 		setAllowDeletes(user.canDeleteRef(repository));
 		setAllowNonFastForwards(user.canRewindRef(repository));
 
+		int maxObjectSz = settings.getInteger(Keys.git.maxObjectSizeLimit, -1);
+		if (maxObjectSz >= 0) {
+			setMaxObjectSizeLimit(maxObjectSz);
+		}
+		int maxPackSz = settings.getInteger(Keys.git.maxPackSizeLimit, -1);
+		if (maxPackSz >= 0) {
+			setMaxPackSizeLimit(maxPackSz);
+		}
+		setCheckReceivedObjects(settings.getBoolean(Keys.git.checkReceivedObjects, true));
+		setCheckReferencedObjectsAreReachable(settings.getBoolean(Keys.git.checkReferencedObjectsAreReachable, true));
+
 		// setup pre and post receive hook
 		setPreReceiveHook(this);
 		setPostReceiveHook(this);
+	}
+
+	/**
+	 * Returns true if the user is permitted to apply the receive commands to
+	 * the repository.
+	 *
+	 * @param commands
+	 * @return true if the user may push these commands
+	 */
+	protected boolean canPush(Collection<ReceiveCommand> commands) {
+		// TODO Consider supporting branch permissions here (issue-36)
+		// Not sure if that should be Gerrit-style, refs/meta/config, or
+		// gitolite-style, permissions in users.conf
+		//
+		// How could commands be empty?
+		//
+		// Because a subclass, like PatchsetReceivePack, filters receive
+		// commands before this method is called.  This makes it possible for
+		// this method to test an empty list.  In this case, we assume that the
+		// subclass receive pack properly enforces push restrictions. for the
+		// ref.
+		//
+		// The empty test is not explicitly required, it's written here to
+		// clarify special-case behavior.
+
+		return commands.isEmpty() ? true : user.canPush(repository);
 	}
 
 	/**
@@ -119,6 +168,14 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 	 */
 	@Override
 	public void onPreReceive(ReceivePack rp, Collection<ReceiveCommand> commands) {
+
+		if (commands.size() == 0) {
+			// no receive commands to process
+			// this can happen if receive pack subclasses intercept and filter
+			// the commands
+			LOGGER.debug("skipping pre-receive processing, no refs created, updated, or removed");
+			return;
+		}
 
 		if (repository.isMirror) {
 			// repository is a mirror
@@ -144,7 +201,7 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 			return;
 		}
 
-		if (!user.canPush(repository)) {
+		if (!canPush(commands)) {
 			// user does not have push permissions
 			for (ReceiveCommand cmd : commands) {
 				sendRejection(cmd, "User \"{0}\" does not have push permissions for \"{1}\"!", user.username, repository.name);
@@ -155,8 +212,11 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 		if (repository.accessRestriction.atLeast(AccessRestrictionType.PUSH) && repository.verifyCommitter) {
 			// enforce committer verification
 			if (StringUtils.isEmpty(user.emailAddress)) {
-				// emit warning if user does not have an email address
-				LOGGER.warn(MessageFormat.format("Consider setting an email address for {0} ({1}) to improve committer verification.", user.getDisplayName(), user.username));
+				// reject the push because the pushing account does not have an email address
+				for (ReceiveCommand cmd : commands) {
+					sendRejection(cmd, "Sorry, the account \"{0}\" does not have an email address set for committer verification!", user.username);
+				}
+				return;
 			}
 
 			// Optionally enforce that the committer of first parent chain
@@ -189,16 +249,9 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 
 						PersonIdent committer = commit.getCommitterIdent();
 						if (!user.is(committer.getName(), committer.getEmailAddress())) {
-							String reason;
-							if (StringUtils.isEmpty(user.emailAddress)) {
-								// account does not have an email address
-								reason = MessageFormat.format("{0} by {1} <{2}> was not committed by {3} ({4})",
-										commit.getId().name(), committer.getName(), StringUtils.isEmpty(committer.getEmailAddress()) ? "?":committer.getEmailAddress(), user.getDisplayName(), user.username);
-							} else {
-								// account has an email address
-								reason = MessageFormat.format("{0} by {1} <{2}> was not committed by {3} ({4}) <{5}>",
-										commit.getId().name(), committer.getName(), StringUtils.isEmpty(committer.getEmailAddress()) ? "?":committer.getEmailAddress(), user.getDisplayName(), user.username, user.emailAddress);
-							}
+							// verification failed
+							String reason = MessageFormat.format("{0} by {1} <{2}> was not committed by {3} ({4}) <{5}>",
+									commit.getId().name(), committer.getName(), StringUtils.isEmpty(committer.getEmailAddress()) ? "?":committer.getEmailAddress(), user.getDisplayName(), user.username, user.emailAddress);
 							LOGGER.warn(reason);
 							cmd.setResult(Result.REJECTED_OTHER_REASON, reason);
 							allRejected &= true;
@@ -218,23 +271,42 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 			}
 		}
 
-		// reset branch commit cache on REWIND and DELETE
 		for (ReceiveCommand cmd : commands) {
 			String ref = cmd.getRefName();
 			if (ref.startsWith(Constants.R_HEADS)) {
 				switch (cmd.getType()) {
 				case UPDATE_NONFASTFORWARD:
 				case DELETE:
+					// reset branch commit cache on REWIND and DELETE
 					CommitCache.instance().clear(repository.name, ref);
 					break;
 				default:
 					break;
 				}
+			} else if (ref.equals(BranchTicketService.BRANCH)) {
+				// ensure pushing user is an administrator OR an owner
+				// i.e. prevent ticket tampering
+				boolean permitted = user.canAdmin() || repository.isOwner(user.username);
+				if (!permitted) {
+					sendRejection(cmd, "{0} is not permitted to push to {1}", user.username, ref);
+				}
+			} else if (ref.startsWith(Constants.R_FOR)) {
+				// prevent accidental push to refs/for
+				sendRejection(cmd, "{0} is not configured to receive patchsets", repository.name);
+			}
+		}
+
+		// call pre-receive plugins
+		for (ReceiveHook hook : gitblit.getExtensions(ReceiveHook.class)) {
+			try {
+				hook.onPreReceive(this, commands);
+			} catch (Exception e) {
+				LOGGER.error("Failed to execute extension", e);
 			}
 		}
 
 		Set<String> scripts = new LinkedHashSet<String>();
-		scripts.addAll(GitBlit.self().getPreReceiveScriptsInherited(repository));
+		scripts.addAll(gitblit.getPreReceiveScriptsInherited(repository));
 		if (!ArrayUtils.isEmpty(repository.preReceiveScripts)) {
 			scripts.addAll(repository.preReceiveScripts);
 		}
@@ -255,9 +327,48 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 	@Override
 	public void onPostReceive(ReceivePack rp, Collection<ReceiveCommand> commands) {
 		if (commands.size() == 0) {
-			LOGGER.debug("skipping post-receive hooks, no refs created, updated, or removed");
+			LOGGER.debug("skipping post-receive processing, no refs created, updated, or removed");
 			return;
 		}
+
+		logRefChange(commands);
+		updateIncrementalPushTags(commands);
+		updateGitblitRefLog(commands);
+
+		// check for updates pushed to the BranchTicketService branch
+		// if the BranchTicketService is active it will reindex, as appropriate
+		for (ReceiveCommand cmd : commands) {
+			if (Result.OK.equals(cmd.getResult())
+					&& BranchTicketService.BRANCH.equals(cmd.getRefName())) {
+				rp.getRepository().fireEvent(new ReceiveCommandEvent(repository, cmd));
+			}
+		}
+
+		// call post-receive plugins
+		for (ReceiveHook hook : gitblit.getExtensions(ReceiveHook.class)) {
+			try {
+				hook.onPostReceive(this, commands);
+			} catch (Exception e) {
+				LOGGER.error("Failed to execute extension", e);
+			}
+		}
+
+		// run Groovy hook scripts
+		Set<String> scripts = new LinkedHashSet<String>();
+		scripts.addAll(gitblit.getPostReceiveScriptsInherited(repository));
+		if (!ArrayUtils.isEmpty(repository.postReceiveScripts)) {
+			scripts.addAll(repository.postReceiveScripts);
+		}
+		runGroovy(commands, scripts);
+	}
+
+	/**
+	 * Log the ref changes in the container log.
+	 *
+	 * @param commands
+	 */
+	protected void logRefChange(Collection<ReceiveCommand> commands) {
+		boolean isRefCreationOrDeletion = false;
 
 		// log ref changes
 		for (ReceiveCommand cmd : commands) {
@@ -267,9 +378,11 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 				switch (cmd.getType()) {
 				case DELETE:
 					LOGGER.info(MessageFormat.format("{0} DELETED {1} in {2} ({3})", user.username, cmd.getRefName(), repository.name, cmd.getOldId().name()));
+					isRefCreationOrDeletion = true;
 					break;
 				case CREATE:
 					LOGGER.info(MessageFormat.format("{0} CREATED {1} in {2}", user.username, cmd.getRefName(), repository.name));
+					isRefCreationOrDeletion = true;
 					break;
 				case UPDATE:
 					LOGGER.info(MessageFormat.format("{0} UPDATED {1} in {2} (from {3} to {4})", user.username, cmd.getRefName(), repository.name, cmd.getOldId().name(), cmd.getNewId().name()));
@@ -283,57 +396,68 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 			}
 		}
 
-		if (repository.useIncrementalPushTags) {
-			// tag each pushed branch tip
-			String emailAddress = user.emailAddress == null ? rp.getRefLogIdent().getEmailAddress() : user.emailAddress;
-			PersonIdent userIdent = new PersonIdent(user.getDisplayName(), emailAddress);
+		if (isRefCreationOrDeletion) {
+			gitblit.resetRepositoryCache(repository.name);
+		}
+	}
 
-			for (ReceiveCommand cmd : commands) {
-				if (!cmd.getRefName().startsWith(Constants.R_HEADS)) {
-					// only tag branch ref changes
-					continue;
+	/**
+	 * Optionally update the incremental push tags.
+	 *
+	 * @param commands
+	 */
+	protected void updateIncrementalPushTags(Collection<ReceiveCommand> commands) {
+		if (!repository.useIncrementalPushTags) {
+			return;
+		}
+
+		// tag each pushed branch tip
+		String emailAddress = user.emailAddress == null ? getRefLogIdent().getEmailAddress() : user.emailAddress;
+		PersonIdent userIdent = new PersonIdent(user.getDisplayName(), emailAddress);
+
+		for (ReceiveCommand cmd : commands) {
+			if (!cmd.getRefName().startsWith(Constants.R_HEADS)) {
+				// only tag branch ref changes
+				continue;
+			}
+
+			if (!ReceiveCommand.Type.DELETE.equals(cmd.getType())
+					&& ReceiveCommand.Result.OK.equals(cmd.getResult())) {
+				String objectId = cmd.getNewId().getName();
+				String branch = cmd.getRefName().substring(Constants.R_HEADS.length());
+				// get translation based on the server's locale setting
+				String template = Translation.get("gb.incrementalPushTagMessage");
+				String msg = MessageFormat.format(template, branch);
+				String prefix;
+				if (StringUtils.isEmpty(repository.incrementalPushTagPrefix)) {
+					prefix = settings.getString(Keys.git.defaultIncrementalPushTagPrefix, "r");
+				} else {
+					prefix = repository.incrementalPushTagPrefix;
 				}
 
-				if (!ReceiveCommand.Type.DELETE.equals(cmd.getType())
-						&& ReceiveCommand.Result.OK.equals(cmd.getResult())) {
-					String objectId = cmd.getNewId().getName();
-					String branch = cmd.getRefName().substring(Constants.R_HEADS.length());
-					// get translation based on the server's locale setting
-					String template = Translation.get("gb.incrementalPushTagMessage");
-					String msg = MessageFormat.format(template, branch);
-					String prefix;
-					if (StringUtils.isEmpty(repository.incrementalPushTagPrefix)) {
-						prefix = GitBlit.getString(Keys.git.defaultIncrementalPushTagPrefix, "r");
-					} else {
-						prefix = repository.incrementalPushTagPrefix;
-					}
-
-					JGitUtils.createIncrementalRevisionTag(
-							rp.getRepository(),
-							objectId,
-							userIdent,
-							prefix,
-							"0",
-							msg);
-				}
+				JGitUtils.createIncrementalRevisionTag(
+						getRepository(),
+						objectId,
+						userIdent,
+						prefix,
+						"0",
+						msg);
 			}
 		}
+	}
 
-		// update push log
+	/**
+	 * Update Gitblit's internal reflog.
+	 *
+	 * @param commands
+	 */
+	protected void updateGitblitRefLog(Collection<ReceiveCommand> commands) {
 		try {
-			RefLogUtils.updateRefLog(user, rp.getRepository(), commands);
-			LOGGER.debug(MessageFormat.format("{0} push log updated", repository.name));
+			RefLogUtils.updateRefLog(user, getRepository(), commands);
+			LOGGER.debug(MessageFormat.format("{0} reflog updated", repository.name));
 		} catch (Exception e) {
-			LOGGER.error(MessageFormat.format("Failed to update {0} pushlog", repository.name), e);
+			LOGGER.error(MessageFormat.format("Failed to update {0} reflog", repository.name), e);
 		}
-
-		// run Groovy hook scripts
-		Set<String> scripts = new LinkedHashSet<String>();
-		scripts.addAll(GitBlit.self().getPostReceiveScriptsInherited(repository));
-		if (!ArrayUtils.isEmpty(repository.postReceiveScripts)) {
-			scripts.addAll(repository.postReceiveScripts);
-		}
-		runGroovy(commands, scripts);
 	}
 
 	/** Execute commands to update references. */
@@ -382,11 +506,7 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 		this.gitblitUrl = url;
 	}
 
-	protected void setRepositoryUrl(String url) {
-		this.repositoryUrl = url;
-	}
-
-	protected void sendRejection(final ReceiveCommand cmd, final String why, Object... objects) {
+	public void sendRejection(final ReceiveCommand cmd, final String why, Object... objects) {
 		String text;
 		if (ArrayUtils.isEmpty(objects)) {
 			text = why;
@@ -397,15 +517,15 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 		LOGGER.error(text + " (" + user.username + ")");
 	}
 
-	protected void sendHeader(String msg, Object... objects) {
-		sendMessage("--->", msg, objects);
+	public void sendHeader(String msg, Object... objects) {
+		sendInfo("--> ", msg, objects);
 	}
 
-	protected void sendMessage(String msg, Object... objects) {
-		sendMessage("    ", msg, objects);
+	public void sendInfo(String msg, Object... objects) {
+		sendInfo("    ", msg, objects);
 	}
 
-	protected void sendMessage(String prefix, String msg, Object... objects) {
+	private void sendInfo(String prefix, String msg, Object... objects) {
 		String text;
 		if (ArrayUtils.isEmpty(objects)) {
 			text = msg;
@@ -414,10 +534,12 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 			text = MessageFormat.format(msg, objects);
 			super.sendMessage(prefix + text);
 		}
-		LOGGER.info(text + " (" + user.username + ")");
+		if (!StringUtils.isEmpty(msg)) {
+			LOGGER.info(text + " (" + user.username + ")");
+		}
 	}
 
-	protected void sendError(String msg, Object... objects) {
+	public void sendError(String msg, Object... objects) {
 		String text;
 		if (ArrayUtils.isEmpty(objects)) {
 			text = msg;
@@ -426,7 +548,9 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 			text = MessageFormat.format(msg, objects);
 			super.sendError(text);
 		}
-		LOGGER.error(text + " (" + user.username + ")");
+		if (!StringUtils.isEmpty(msg)) {
+			LOGGER.error(text + " (" + user.username + ")");
+		}
 	}
 
 	/**
@@ -444,7 +568,7 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 		}
 
 		Binding binding = new Binding();
-		binding.setVariable("gitblit", GitBlit.self());
+		binding.setVariable("gitblit", gitblit);
 		binding.setVariable("repository", repository);
 		binding.setVariable("receivePack", this);
 		binding.setVariable("user", user);
@@ -479,5 +603,17 @@ public class GitblitReceivePack extends ReceivePack implements PreReceiveHook, P
 						MessageFormat.format("Failed to execute Groovy script {0}", script), e);
 			}
 		}
+	}
+
+	public IGitblit getGitblit() {
+		return gitblit;
+	}
+
+	public RepositoryModel getRepositoryModel() {
+		return repository;
+	}
+
+	public UserModel getUserModel() {
+		return user;
 	}
 }

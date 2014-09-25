@@ -43,7 +43,6 @@ import org.eclipse.jgit.lib.PersonIdent;
 import com.gitblit.Constants.AccessPermission;
 import com.gitblit.Constants.PermissionType;
 import com.gitblit.Constants.RegistrantType;
-import com.gitblit.GitBlit;
 import com.gitblit.models.RegistrantAccessPermission;
 import com.gitblit.models.UserModel;
 import com.gitblit.utils.DeepCopier;
@@ -140,13 +139,13 @@ public class RegistrantPermissionsPanel extends BasePanel {
 				} else if (RegistrantType.USER.equals(entry.registrantType)) {
 					// user
 					PersonIdent ident = new PersonIdent(entry.registrant, "");
-					UserModel user = GitBlit.self().getUserModel(entry.registrant);
+					UserModel user = app().users().getUserModel(entry.registrant);
 					if (user != null) {
 						ident = new PersonIdent(user.getDisplayName(), user.emailAddress == null ? user.getDisplayName() : user.emailAddress);
 					}
 
 					Fragment userFragment = new Fragment("registrant", "userRegistrant", RegistrantPermissionsPanel.this);
-					userFragment.add(new GravatarImage("userAvatar", ident, 20, false));
+					userFragment.add(new GravatarImage("userAvatar", ident, 20));
 					userFragment.add(new Label("userName", entry.registrant));
 					item.add(userFragment);
 				} else {
@@ -259,6 +258,9 @@ public class RegistrantPermissionsPanel extends BasePanel {
 				// add permission to our list
 				RegistrantAccessPermission rp = (RegistrantAccessPermission) form.getModel().getObject();
 				if (rp.permission == null) {
+					return;
+				}
+				if (rp.registrant == null) {
 					return;
 				}
 				RegistrantAccessPermission copy = DeepCopier.copy(rp);

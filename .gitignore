@@ -22,3 +22,8 @@
 /build-next.xml
 /*.ps1
 /*.sh
+/*.factorypath
+/src/main/dagger
+/**/.idea
+/**/init.lua
+/**/session

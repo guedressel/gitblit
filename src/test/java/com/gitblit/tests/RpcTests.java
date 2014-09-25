@@ -15,11 +15,6 @@
  */
 package com.gitblit.tests;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -37,10 +32,9 @@ import com.gitblit.Constants.AccessRestrictionType;
 import com.gitblit.Constants.AuthorizationControl;
 import com.gitblit.Constants.PermissionType;
 import com.gitblit.Constants.RegistrantType;
-import com.gitblit.GitBlitException.NotAllowedException;
+import com.gitblit.GitBlitException.ForbiddenException;
 import com.gitblit.GitBlitException.UnauthorizedException;
 import com.gitblit.Keys;
-import com.gitblit.RpcServlet;
 import com.gitblit.models.FederationModel;
 import com.gitblit.models.FederationProposal;
 import com.gitblit.models.FederationSet;
@@ -50,6 +44,7 @@ import com.gitblit.models.ServerSettings;
 import com.gitblit.models.ServerStatus;
 import com.gitblit.models.TeamModel;
 import com.gitblit.models.UserModel;
+import com.gitblit.servlet.RpcServlet;
 import com.gitblit.utils.RpcUtils;
 
 /**
@@ -58,7 +53,7 @@ import com.gitblit.utils.RpcUtils;
  * @author James Moger
  *
  */
-public class RpcTests {
+public class RpcTests extends GitblitUnitTest {
 
 	String url = GitBlitSuite.url;
 	String account = GitBlitSuite.account;
@@ -109,7 +104,7 @@ public class RpcTests {
 		UserModel user = null;
 		try {
 			user = RpcUtils.getUser("admin", url, null, null);
-		} catch (NotAllowedException e) {
+		} catch (ForbiddenException e) {
 		}
 		assertNull("Server allows anyone to get user!", user);
 
@@ -401,5 +396,68 @@ public class RpcTests {
 				password.toCharArray());
 		assertNotNull(branches);
 		assertTrue(branches.size() > 0);
+	}
+
+	@Test
+	public void testFork() throws Exception {
+		// test forking by an administrator
+		// admins are all-powerful and can fork the unforakable :)
+		testFork(account, password, true, true);
+		testFork(account, password, false, true);
+
+		// test forking by a permitted normal user
+		UserModel forkUser = new UserModel("forkuser");
+		forkUser.password = forkUser.username;
+		forkUser.canFork = true;
+		RpcUtils.deleteUser(forkUser, url, account, password.toCharArray());
+		RpcUtils.createUser(forkUser, url, account, password.toCharArray());
+		testFork(forkUser.username, forkUser.password, true, true);
+		testFork(forkUser.username, forkUser.password, false, false);
+		RpcUtils.deleteUser(forkUser, url, account, password.toCharArray());
+
+		// test forking by a non-permitted normal user
+		UserModel noForkUser = new UserModel("noforkuser");
+		noForkUser.password = noForkUser.username;
+		noForkUser.canFork = false;
+		RpcUtils.deleteUser(noForkUser, url, account, password.toCharArray());
+		RpcUtils.createUser(noForkUser, url, account, password.toCharArray());
+		testFork(forkUser.username, forkUser.password, true, false);
+		testFork(forkUser.username, forkUser.password, false, false);
+		RpcUtils.deleteUser(noForkUser, url, account, password.toCharArray());
+	}
+
+	private void testFork(String forkAcct, String forkAcctPassword, boolean allowForks, boolean expectSuccess) throws Exception {
+		// test does not exist
+		RepositoryModel dne = new RepositoryModel();
+		dne.name = "doesNotExist.git";
+        assertFalse(String.format("Successfully forked %s!", dne.name),
+                RpcUtils.forkRepository(dne, url, forkAcct, forkAcctPassword.toCharArray()));
+
+		// delete any previous fork
+		RepositoryModel fork = findRepository(String.format("~%s/helloworld.git", forkAcct));
+		if (fork != null) {
+			RpcUtils.deleteRepository(fork, url, account, password.toCharArray());
+		}
+
+		// update the origin to allow forks or not
+		RepositoryModel origin = findRepository("helloworld.git");
+		origin.allowForks = allowForks;
+		RpcUtils.updateRepository(origin.name, origin, url, account, password.toCharArray());
+
+		// fork the repository
+		if (expectSuccess) {
+			assertTrue(String.format("Failed to fork %s!", origin.name),
+                RpcUtils.forkRepository(origin, url, forkAcct, forkAcctPassword.toCharArray()));
+		} else {
+			assertFalse(String.format("Successfully forked %s!", origin.name),
+	                RpcUtils.forkRepository(origin, url, forkAcct, forkAcctPassword.toCharArray()));
+		}
+
+        // attempt another fork
+        assertFalse(String.format("Successfully forked %s!", origin.name),
+                RpcUtils.forkRepository(origin, url, forkAcct, forkAcctPassword.toCharArray()));
+
+        // delete the fork repository
+        RpcUtils.deleteRepository(fork, url, account, password.toCharArray());
 	}
 }

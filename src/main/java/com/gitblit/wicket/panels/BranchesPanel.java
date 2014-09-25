@@ -37,11 +37,11 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 
 import com.gitblit.Constants;
-import com.gitblit.GitBlit;
-import com.gitblit.SyndicationServlet;
 import com.gitblit.models.RefModel;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
+import com.gitblit.servlet.RawServlet;
+import com.gitblit.servlet.SyndicationServlet;
 import com.gitblit.utils.CommitCache;
 import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.RefLogUtils;
@@ -134,7 +134,7 @@ public class BranchesPanel extends BasePanel {
 						CommitPage.class, WicketUtils.newObjectParameter(model.name,
 								entry.getName()));
 				if (!shortMessage.equals(trimmedMessage)) {
-					WicketUtils.setHtmlTooltip(shortlog, shortMessage);
+					shortlog.setTooltip(shortMessage);
 				}
 				item.add(shortlog);
 
@@ -144,6 +144,8 @@ public class BranchesPanel extends BasePanel {
 							.newObjectParameter(model.name, entry.getName())));
 					fragment.add(new BookmarkablePageLink<Void>("tree", TreePage.class, WicketUtils
 							.newObjectParameter(model.name, entry.getName())));
+					String rawUrl = RawServlet.asLink(getContextUrl(), model.name, Repository.shortenRefName(entry.getName()), null);
+					fragment.add(new ExternalLink("raw",  rawUrl));
 					fragment.add(new BookmarkablePageLink<Void>("metrics", MetricsPage.class,
 							WicketUtils.newObjectParameter(model.name, entry.getName())));
 					fragment.add(new ExternalLink("syndication", SyndicationServlet.asLink(
@@ -159,6 +161,8 @@ public class BranchesPanel extends BasePanel {
 							.newObjectParameter(model.name, entry.getName())));
 					fragment.add(new BookmarkablePageLink<Void>("tree", TreePage.class, WicketUtils
 							.newObjectParameter(model.name, entry.getName())));
+					String rawUrl = RawServlet.asLink(getContextUrl(), model.name, Repository.shortenRefName(entry.getName()), null);
+					fragment.add(new ExternalLink("raw",  rawUrl));
 					item.add(fragment);
 				}
 				WicketUtils.setAlternatingBackground(item, counter);
@@ -190,9 +194,9 @@ public class BranchesPanel extends BasePanel {
 
 			@Override
 			public void onClick() {
-				Repository r = GitBlit.self().getRepository(repositoryModel.name);
+				Repository r = app().repositories().getRepository(repositoryModel.name);
 				if (r == null) {
-					if (GitBlit.self().isCollectingGarbage(repositoryModel.name)) {
+					if (app().repositories().isCollectingGarbage(repositoryModel.name)) {
 						error(MessageFormat.format(getString("gb.busyCollectingGarbage"), repositoryModel.name));
 					} else {
 						error(MessageFormat.format("Failed to find repository {0}", repositoryModel.name));

@@ -32,7 +32,7 @@ import com.gitblit.utils.FileUtils;
  */
 public class FileSettings extends IStoredSettings {
 
-	protected final File propertiesFile;
+	protected File propertiesFile;
 
 	private final Properties properties = new Properties();
 
@@ -40,9 +40,32 @@ public class FileSettings extends IStoredSettings {
 
 	private volatile boolean forceReload;
 
-	public FileSettings(String file) {
+	public FileSettings() {
 		super(FileSettings.class);
+	}
+
+	public FileSettings(String file) {
+		this();
+		load(file);
+	}
+
+	public void load(String file) {
 		this.propertiesFile = new File(file);
+	}
+
+	/**
+	 * Merges the provided settings into this instance.  This will also
+	 * set the target file for this instance IFF it is unset AND the merge
+	 * source is also a FileSettings.  This is a little sneaky.
+	 */
+	@Override
+	public void merge(IStoredSettings settings) {
+		super.merge(settings);
+
+		// sneaky: set the target file from the merge source
+		if (propertiesFile == null && settings instanceof FileSettings) {
+			this.propertiesFile = ((FileSettings) settings).propertiesFile;
+		}
 	}
 
 	/**
@@ -51,7 +74,7 @@ public class FileSettings extends IStoredSettings {
 	 */
 	@Override
 	protected synchronized Properties read() {
-		if (propertiesFile.exists() && (forceReload || (propertiesFile.lastModified() > lastModified))) {
+		if (propertiesFile != null && propertiesFile.exists() && (forceReload || (propertiesFile.lastModified() > lastModified))) {
 			FileInputStream is = null;
 			try {
 				Properties props = new Properties();
@@ -78,6 +101,23 @@ public class FileSettings extends IStoredSettings {
 			}
 		}
 		return properties;
+	}
+
+	@Override
+	public boolean saveSettings() {
+		String content = FileUtils.readContent(propertiesFile, "\n");
+		for (String key : removals) {
+			String regex = "(?m)^(" + regExEscape(key) + "\\s*+=\\s*+)"
+				    + "(?:[^\r\n\\\\]++|\\\\(?:\r?\n|\r|.))*+$";
+			content = content.replaceAll(regex, "");
+		}
+		removals.clear();
+
+		FileUtils.writeContent(propertiesFile, content);
+		// manually set the forceReload flag because not all JVMs support real
+		// millisecond resolution of lastModified. (issue-55)
+		forceReload = true;
+		return true;
 	}
 
 	/**

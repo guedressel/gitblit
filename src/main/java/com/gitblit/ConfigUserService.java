@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +36,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.gitblit.Constants.AccessPermission;
+import com.gitblit.Constants.AccountType;
+import com.gitblit.Constants.Transport;
+import com.gitblit.manager.IRuntimeManager;
 import com.gitblit.models.TeamModel;
 import com.gitblit.models.UserModel;
 import com.gitblit.models.UserRepositoryPreferences;
@@ -94,6 +98,14 @@ public class ConfigUserService implements IUserService {
 
 	private static final String LOCALE = "locale";
 
+	private static final String EMAILONMYTICKETCHANGES = "emailMeOnMyTicketChanges";
+
+	private static final String TRANSPORT = "transport";
+
+	private static final String ACCOUNTTYPE = "accountType";
+
+	private static final String DISABLED = "disabled";
+
 	private final File realmFile;
 
 	private final Logger logger = LoggerFactory.getLogger(ConfigUserService.class);
@@ -115,65 +127,11 @@ public class ConfigUserService implements IUserService {
 	/**
 	 * Setup the user service.
 	 *
-	 * @param settings
-	 * @since 0.7.0
+	 * @param runtimeManager
+	 * @since 1.4.0
 	 */
 	@Override
-	public void setup(IStoredSettings settings) {
-	}
-
-	/**
-	 * Does the user service support changes to credentials?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	@Override
-	public boolean supportsCredentialChanges() {
-		return true;
-	}
-
-	/**
-	 * Does the user service support changes to user display name?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	@Override
-	public boolean supportsDisplayNameChanges() {
-		return true;
-	}
-
-	/**
-	 * Does the user service support changes to user email address?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	@Override
-	public boolean supportsEmailAddressChanges() {
-		return true;
-	}
-
-	/**
-	 * Does the user service support changes to team memberships?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	@Override
-	public boolean supportsTeamMembershipChanges() {
-		return true;
-	}
-
-	/**
-	 * Does the user service support cookie authentication?
-	 *
-	 * @return true or false
-	 */
-	@Override
-	public boolean supportsCookies() {
-		return true;
+	public void setup(IRuntimeManager runtimeManager) {
 	}
 
 	/**
@@ -183,7 +141,7 @@ public class ConfigUserService implements IUserService {
 	 * @return cookie value
 	 */
 	@Override
-	public String getCookie(UserModel model) {
+	public synchronized String getCookie(UserModel model) {
 		if (!StringUtils.isEmpty(model.cookie)) {
 			return model.cookie;
 		}
@@ -195,13 +153,13 @@ public class ConfigUserService implements IUserService {
 	}
 
 	/**
-	 * Authenticate a user based on their cookie.
+	 * Gets the user object for the specified cookie.
 	 *
 	 * @param cookie
 	 * @return a user object or null
 	 */
 	@Override
-	public synchronized UserModel authenticate(char[] cookie) {
+	public synchronized UserModel getUserModel(char[] cookie) {
 		String hash = new String(cookie);
 		if (StringUtils.isEmpty(hash)) {
 			return null;
@@ -218,49 +176,6 @@ public class ConfigUserService implements IUserService {
 			model = DeepCopier.copy(model);
 		}
 		return model;
-	}
-
-	/**
-	 * Authenticate a user based on a username and password.
-	 *
-	 * @param username
-	 * @param password
-	 * @return a user object or null
-	 */
-	@Override
-	public UserModel authenticate(String username, char[] password) {
-		UserModel returnedUser = null;
-		UserModel user = getUserModel(username);
-		if (user == null) {
-			return null;
-		}
-		if (user.password.startsWith(StringUtils.MD5_TYPE)) {
-			// password digest
-			String md5 = StringUtils.MD5_TYPE + StringUtils.getMD5(new String(password));
-			if (user.password.equalsIgnoreCase(md5)) {
-				returnedUser = user;
-			}
-		} else if (user.password.startsWith(StringUtils.COMBINED_MD5_TYPE)) {
-			// username+password digest
-			String md5 = StringUtils.COMBINED_MD5_TYPE
-					+ StringUtils.getMD5(username.toLowerCase() + new String(password));
-			if (user.password.equalsIgnoreCase(md5)) {
-				returnedUser = user;
-			}
-		} else if (user.password.equals(new String(password))) {
-			// plain-text password
-			returnedUser = user;
-		}
-		return returnedUser;
-	}
-
-	/**
-	 * Logout a user.
-	 *
-	 * @param user
-	 */
-	@Override
-	public void logout(UserModel user) {
 	}
 
 	/**
@@ -288,7 +203,7 @@ public class ConfigUserService implements IUserService {
 	 * @return true if update is successful
 	 */
 	@Override
-	public boolean updateUserModel(UserModel model) {
+	public synchronized boolean updateUserModel(UserModel model) {
 		return updateUserModel(model.username, model);
 	}
 
@@ -309,18 +224,22 @@ public class ConfigUserService implements IUserService {
 				// null check on "final" teams because JSON-sourced UserModel
 				// can have a null teams object
 				if (model.teams != null) {
+					Set<TeamModel> userTeams = new HashSet<TeamModel>();
 					for (TeamModel team : model.teams) {
 						TeamModel t = teams.get(team.name.toLowerCase());
 						if (t == null) {
 							// new team
-							team.addUser(model.username);
-							teams.put(team.name.toLowerCase(), team);
-						} else {
-							// do not clobber existing team definition
-							// maybe because this is a federated user
-							t.addUser(model.username);
+							t = team;
+							teams.put(team.name.toLowerCase(), t);
 						}
+						// do not clobber existing team definition
+						// maybe because this is a federated user
+						t.addUser(model.username);
+						userTeams.add(t);
 					}
+					// replace Team-Models in users by new ones.
+					model.teams.clear();
+					model.teams.addAll(userTeams);
 
 					// check for implicit team removal
 					if (originalUser != null) {
@@ -355,8 +274,15 @@ public class ConfigUserService implements IUserService {
 	public synchronized boolean updateUserModel(String username, UserModel model) {
 		UserModel originalUser = null;
 		try {
+			if (!model.isLocalAccount()) {
+				// do not persist password
+				model.password = Constants.EXTERNAL_ACCOUNT;
+			}
 			read();
 			originalUser = users.remove(username.toLowerCase());
+			if (originalUser != null) {
+				cookies.remove(originalUser.cookie);
+			}
 			users.put(model.username.toLowerCase(), model);
 			// null check on "final" teams because JSON-sourced UserModel
 			// can have a null teams object
@@ -407,7 +333,7 @@ public class ConfigUserService implements IUserService {
 	 * @return true if successful
 	 */
 	@Override
-	public boolean deleteUserModel(UserModel model) {
+	public synchronized boolean deleteUserModel(UserModel model) {
 		return deleteUser(model.username);
 	}
 
@@ -454,7 +380,7 @@ public class ConfigUserService implements IUserService {
 	 * @since 0.8.0
 	 */
 	@Override
-	public List<String> getAllTeamNames() {
+	public synchronized List<String> getAllTeamNames() {
 		read();
 		List<String> list = new ArrayList<String>(teams.keySet());
 		Collections.sort(list);
@@ -485,7 +411,7 @@ public class ConfigUserService implements IUserService {
 	 * @return list of all usernames that can bypass the access restriction
 	 */
 	@Override
-	public synchronized List<String> getTeamnamesForRepositoryRole(String role) {
+	public synchronized List<String> getTeamNamesForRepositoryRole(String role) {
 		List<String> list = new ArrayList<String>();
 		try {
 			read();
@@ -500,45 +426,6 @@ public class ConfigUserService implements IUserService {
 		}
 		Collections.sort(list);
 		return list;
-	}
-
-	/**
-	 * Sets the list of all teams who are allowed to bypass the access
-	 * restriction placed on the specified repository.
-	 *
-	 * @param role
-	 *            the repository name
-	 * @param teamnames
-	 * @return true if successful
-	 */
-	@Override
-	public synchronized boolean setTeamnamesForRepositoryRole(String role, List<String> teamnames) {
-		try {
-			Set<String> specifiedTeams = new HashSet<String>();
-			for (String teamname : teamnames) {
-				specifiedTeams.add(teamname.toLowerCase());
-			}
-
-			read();
-
-			// identify teams which require add or remove role
-			for (TeamModel team : teams.values()) {
-				// team has role, check against revised team list
-				if (specifiedTeams.contains(team.name.toLowerCase())) {
-					team.addRepositoryPermission(role);
-				} else {
-					// remove role from team
-					team.removeRepositoryPermission(role);
-				}
-			}
-
-			// persist changes
-			write();
-			return true;
-		} catch (Throwable t) {
-			logger.error(MessageFormat.format("Failed to set teams for role {0}!", role), t);
-		}
-		return false;
 	}
 
 	/**
@@ -568,7 +455,7 @@ public class ConfigUserService implements IUserService {
 	 * @since 0.8.0
 	 */
 	@Override
-	public boolean updateTeamModel(TeamModel model) {
+	public synchronized boolean updateTeamModel(TeamModel model) {
 		return updateTeamModel(model.name, model);
 	}
 
@@ -580,7 +467,7 @@ public class ConfigUserService implements IUserService {
 	 * @since 1.2.0
 	 */
 	@Override
-	public boolean updateTeamModels(Collection<TeamModel> models) {
+	public synchronized boolean updateTeamModels(Collection<TeamModel> models) {
 		try {
 			read();
 			for (TeamModel team : models) {
@@ -606,7 +493,7 @@ public class ConfigUserService implements IUserService {
 	 * @since 0.8.0
 	 */
 	@Override
-	public boolean updateTeamModel(String teamname, TeamModel model) {
+	public synchronized boolean updateTeamModel(String teamname, TeamModel model) {
 		TeamModel original = null;
 		try {
 			read();
@@ -635,7 +522,7 @@ public class ConfigUserService implements IUserService {
 	 * @since 0.8.0
 	 */
 	@Override
-	public boolean deleteTeamModel(TeamModel model) {
+	public synchronized boolean deleteTeamModel(TeamModel model) {
 		return deleteTeam(model.name);
 	}
 
@@ -647,7 +534,7 @@ public class ConfigUserService implements IUserService {
 	 * @since 0.8.0
 	 */
 	@Override
-	public boolean deleteTeam(String teamname) {
+	public synchronized boolean deleteTeam(String teamname) {
 		try {
 			// Read realm file
 			read();
@@ -666,7 +553,7 @@ public class ConfigUserService implements IUserService {
 	 * @return list of all usernames
 	 */
 	@Override
-	public List<String> getAllUsernames() {
+	public synchronized List<String> getAllUsernames() {
 		read();
 		List<String> list = new ArrayList<String>(users.keySet());
 		Collections.sort(list);
@@ -711,46 +598,6 @@ public class ConfigUserService implements IUserService {
 		}
 		Collections.sort(list);
 		return list;
-	}
-
-	/**
-	 * Sets the list of all uses who are allowed to bypass the access
-	 * restriction placed on the specified repository.
-	 *
-	 * @param role
-	 *            the repository name
-	 * @param usernames
-	 * @return true if successful
-	 */
-	@Override
-	@Deprecated
-	public synchronized boolean setUsernamesForRepositoryRole(String role, List<String> usernames) {
-		try {
-			Set<String> specifiedUsers = new HashSet<String>();
-			for (String username : usernames) {
-				specifiedUsers.add(username.toLowerCase());
-			}
-
-			read();
-
-			// identify users which require add or remove role
-			for (UserModel user : users.values()) {
-				// user has role, check against revised user list
-				if (specifiedUsers.contains(user.username.toLowerCase())) {
-					user.addRepositoryPermission(role);
-				} else {
-					// remove role from user
-					user.removeRepositoryPermission(role);
-				}
-			}
-
-			// persist changes
-			write();
-			return true;
-		} catch (Throwable t) {
-			logger.error(MessageFormat.format("Failed to set usernames for role {0}!", role), t);
-		}
-		return false;
 	}
 
 	/**
@@ -844,6 +691,9 @@ public class ConfigUserService implements IUserService {
 			if (!StringUtils.isEmpty(model.emailAddress)) {
 				config.setString(USER, model.username, EMAILADDRESS, model.emailAddress);
 			}
+			if (model.accountType != null) {
+				config.setString(USER, model.username, ACCOUNTTYPE, model.accountType.name());
+			}
 			if (!StringUtils.isEmpty(model.organizationalUnit)) {
 				config.setString(USER, model.username, ORGANIZATIONALUNIT, model.organizationalUnit);
 			}
@@ -859,9 +709,25 @@ public class ConfigUserService implements IUserService {
 			if (!StringUtils.isEmpty(model.countryCode)) {
 				config.setString(USER, model.username, COUNTRYCODE, model.countryCode);
 			}
+			if (model.disabled) {
+				config.setBoolean(USER, model.username, DISABLED, true);
+			}
 			if (model.getPreferences() != null) {
-				if (!StringUtils.isEmpty(model.getPreferences().locale)) {
-					config.setString(USER, model.username, LOCALE, model.getPreferences().locale);
+				Locale locale = model.getPreferences().getLocale();
+				if (locale != null) {
+					String val;
+					if (StringUtils.isEmpty(locale.getCountry())) {
+						val = locale.getLanguage();
+					} else {
+						val = locale.getLanguage() + "_" + locale.getCountry();
+					}
+					config.setString(USER, model.username, LOCALE, val);
+				}
+
+				config.setBoolean(USER, model.username, EMAILONMYTICKETCHANGES, model.getPreferences().isEmailMeOnMyTicketChanges());
+
+				if (model.getPreferences().getTransport() != null) {
+					config.setString(USER, model.username, TRANSPORT, model.getPreferences().getTransport().name());
 				}
 			}
 
@@ -926,6 +792,9 @@ public class ConfigUserService implements IUserService {
 				roles.add(Constants.NO_ROLE);
 			}
 			config.setStringList(TEAM, model.name, ROLE, roles);
+			if (model.accountType != null) {
+				config.setString(TEAM, model.name, ACCOUNTTYPE, model.accountType.name());
+			}
 
 			if (!model.canAdmin) {
 				// write team permission for non-admin teams
@@ -1019,16 +888,25 @@ public class ConfigUserService implements IUserService {
 					user.password = config.getString(USER, username, PASSWORD);
 					user.displayName = config.getString(USER, username, DISPLAYNAME);
 					user.emailAddress = config.getString(USER, username, EMAILADDRESS);
+					user.accountType = AccountType.fromString(config.getString(USER, username, ACCOUNTTYPE));
+					if (Constants.EXTERNAL_ACCOUNT.equals(user.password) && user.accountType.isLocal()) {
+						user.accountType = AccountType.EXTERNAL;
+					}
+					user.disabled = config.getBoolean(USER, username, DISABLED, false);
 					user.organizationalUnit = config.getString(USER, username, ORGANIZATIONALUNIT);
 					user.organization = config.getString(USER, username, ORGANIZATION);
 					user.locality = config.getString(USER, username, LOCALITY);
 					user.stateProvince = config.getString(USER, username, STATEPROVINCE);
 					user.countryCode = config.getString(USER, username, COUNTRYCODE);
 					user.cookie = config.getString(USER, username, COOKIE);
-					user.getPreferences().locale = config.getString(USER, username, LOCALE);
 					if (StringUtils.isEmpty(user.cookie) && !StringUtils.isEmpty(user.password)) {
 						user.cookie = StringUtils.getSHA1(user.username + user.password);
 					}
+
+					// preferences
+					user.getPreferences().setLocale(config.getString(USER, username, LOCALE));
+					user.getPreferences().setEmailMeOnMyTicketChanges(config.getBoolean(USER, username, EMAILONMYTICKETCHANGES, true));
+					user.getPreferences().setTransport(Transport.fromString(config.getString(USER, username, TRANSPORT)));
 
 					// user roles
 					Set<String> roles = new HashSet<String>(Arrays.asList(config.getStringList(
@@ -1072,6 +950,7 @@ public class ConfigUserService implements IUserService {
 					team.canAdmin = roles.contains(Constants.ADMIN_ROLE);
 					team.canFork = roles.contains(Constants.FORK_ROLE);
 					team.canCreate = roles.contains(Constants.CREATE_ROLE);
+					team.accountType = AccountType.fromString(config.getString(TEAM, teamname, ACCOUNTTYPE));
 
 					if (!team.canAdmin) {
 						// non-admin team, read permissions

@@ -18,20 +18,23 @@ package com.gitblit.wicket.pages;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.text.MessageFormat;
 import java.util.HashMap;
 import java.util.Map;
+
+import javax.servlet.http.HttpServletResponse;
 
 import org.apache.wicket.IRequestTarget;
 import org.apache.wicket.PageParameters;
 import org.apache.wicket.RequestCycle;
 import org.apache.wicket.protocol.http.WebRequest;
 import org.apache.wicket.protocol.http.WebResponse;
+import org.apache.wicket.protocol.http.servlet.AbortWithWebErrorCodeException;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.gitblit.GitBlit;
 import com.gitblit.Keys;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
@@ -66,11 +69,12 @@ public class RawPage extends SessionPage {
 				final String repositoryName = WicketUtils.getRepositoryName(params);
 				final String objectId = WicketUtils.getObject(params);
 				final String blobPath = WicketUtils.getPath(params);
-				String[] encodings = GitBlit.getEncodings();
+
+				String[] encodings = getEncodings();
 				GitBlitWebSession session = GitBlitWebSession.get();
 				UserModel user = session.getUser();
 
-				RepositoryModel model = GitBlit.self().getRepositoryModel(user, repositoryName);
+				RepositoryModel model = app().repositories().getRepositoryModel(user, repositoryName);
 				if (model == null) {
 					// user does not have permission
 					error(getString("gb.canNotLoadRepository") + " " + repositoryName);
@@ -78,7 +82,7 @@ public class RawPage extends SessionPage {
 					return;
 				}
 
-				Repository r = GitBlit.self().getRepository(repositoryName);
+				Repository r = app().repositories().getRepository(repositoryName);
 				if (r == null) {
 					error(getString("gb.canNotLoadRepository") + " " + repositoryName);
 					redirectToInterceptPage(new RepositoriesPage());
@@ -88,6 +92,12 @@ public class RawPage extends SessionPage {
 				if (StringUtils.isEmpty(blobPath)) {
 					// objectid referenced raw view
 					byte [] binary = JGitUtils.getByteContent(r, objectId);
+					if (binary == null) {
+						final String objectNotFound = MessageFormat.format("Raw page failed to find object {0} in {1}",
+								objectId, repositoryName);
+						logger.error(objectNotFound);
+						throw new AbortWithWebErrorCodeException(HttpServletResponse.SC_NOT_FOUND, objectNotFound);
+					}
 					contentType = "application/octet-stream";
 					response.setContentType(contentType);
 					response.setContentLength(binary.length);
@@ -99,6 +109,12 @@ public class RawPage extends SessionPage {
 				} else {
 					// standard raw blob view
 					RevCommit commit = JGitUtils.getCommit(r, objectId);
+					if (commit == null) {
+						final String commitNotFound = MessageFormat.format("Raw page failed to find commit {0} in {1}",
+								objectId, repositoryName);
+						logger.error(commitNotFound);
+						throw new AbortWithWebErrorCodeException(HttpServletResponse.SC_NOT_FOUND, commitNotFound);
+					}
 
 					String filename = blobPath;
 					if (blobPath.indexOf('/') > -1) {
@@ -112,12 +128,15 @@ public class RawPage extends SessionPage {
 
 					// Map the extensions to types
 					Map<String, Integer> map = new HashMap<String, Integer>();
-					for (String ext : GitBlit.getStrings(Keys.web.imageExtensions)) {
+					for (String ext : app().settings().getStrings(Keys.web.imageExtensions)) {
 						map.put(ext.toLowerCase(), 2);
 					}
-					for (String ext : GitBlit.getStrings(Keys.web.binaryExtensions)) {
+					for (String ext : app().settings().getStrings(Keys.web.binaryExtensions)) {
 						map.put(ext.toLowerCase(), 3);
 					}
+
+					final String blobNotFound = MessageFormat.format("Raw page failed to find blob {0} in {1} @ {2}",
+							blobPath, repositoryName, objectId);
 
 					if (extension != null) {
 						int type = 0;
@@ -128,6 +147,10 @@ public class RawPage extends SessionPage {
 						case 2:
 							// image blobs
 							byte[] image = JGitUtils.getByteContent(r, commit.getTree(), blobPath, true);
+							if (image == null) {
+								logger.error(blobNotFound);
+								throw new AbortWithWebErrorCodeException(HttpServletResponse.SC_NOT_FOUND, blobNotFound);
+							}
 							contentType = "image/" + extension.toLowerCase();
 							response.setContentType(contentType);
 							response.setContentLength(image.length);
@@ -140,6 +163,10 @@ public class RawPage extends SessionPage {
 						case 3:
 							// binary blobs (download)
 							byte[] binary = JGitUtils.getByteContent(r, commit.getTree(), blobPath, true);
+							if (binary == null) {
+								logger.error(blobNotFound);
+								throw new AbortWithWebErrorCodeException(HttpServletResponse.SC_NOT_FOUND, blobNotFound);
+							}
 							contentType = "application/octet-stream";
 							response.setContentLength(binary.length);
 							response.setContentType(contentType);
@@ -173,6 +200,10 @@ public class RawPage extends SessionPage {
 							// plain text
 							String content = JGitUtils.getStringContent(r, commit.getTree(),
 									blobPath, encodings);
+							if (content == null) {
+								logger.error(blobNotFound);
+								throw new AbortWithWebErrorCodeException(HttpServletResponse.SC_NOT_FOUND, blobNotFound);
+							}
 							contentType = "text/plain; charset=UTF-8";
 							response.setContentType(contentType);
 							try {
@@ -186,6 +217,10 @@ public class RawPage extends SessionPage {
 						// plain text
 						String content = JGitUtils.getStringContent(r, commit.getTree(), blobPath,
 								encodings);
+						if (content == null) {
+							logger.error(blobNotFound);
+							throw new AbortWithWebErrorCodeException(HttpServletResponse.SC_NOT_FOUND, blobNotFound);
+						}
 						contentType = "text/plain; charset=UTF-8";
 						response.setContentType(contentType);
 						try {

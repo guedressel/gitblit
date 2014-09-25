@@ -33,10 +33,11 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 import org.junit.runners.Suite.SuiteClasses;
 
-import com.gitblit.GitBlit;
 import com.gitblit.GitBlitException;
 import com.gitblit.GitBlitServer;
+import com.gitblit.manager.IRepositoryManager;
 import com.gitblit.models.RepositoryModel;
+import com.gitblit.servlet.GitblitContext;
 import com.gitblit.utils.JGitUtils;
 
 /**
@@ -55,14 +56,19 @@ import com.gitblit.utils.JGitUtils;
 @RunWith(Suite.class)
 @SuiteClasses({ ArrayUtilsTest.class, FileUtilsTest.class, TimeUtilsTest.class,
 		StringUtilsTest.class, Base64Test.class, JsonUtilsTest.class, ByteFormatTest.class,
-		ObjectCacheTest.class, PermissionsTest.class, UserServiceTest.class, LdapUserServiceTest.class,
+		UserModelTest.class, UserChoiceTest.class,
+		ObjectCacheTest.class, PermissionsTest.class, UserServiceTest.class, LdapAuthenticationTest.class,
 		MarkdownUtilsTest.class, JGitUtilsTest.class, SyndicationUtilsTest.class,
 		DiffUtilsTest.class, MetricUtilsTest.class, X509UtilsTest.class,
 		GitBlitTest.class, FederationTests.class, RpcTests.class, GitServletTest.class, GitDaemonTest.class,
-		GroovyScriptTest.class, LuceneExecutorTest.class, RepositoryModelTest.class,
-		FanoutServiceTest.class, Issue0259Test.class, Issue0271Test.class, HtpasswdUserServiceTest.class,
-		ModelUtilsTest.class, JnaUtilsTest.class })
+		SshDaemonTest.class, GroovyScriptTest.class, LuceneExecutorTest.class, RepositoryModelTest.class,
+		FanoutServiceTest.class, Issue0259Test.class, Issue0271Test.class, HtpasswdAuthenticationTest.class,
+		ModelUtilsTest.class, JnaUtilsTest.class, LdapSyncServiceTest.class, FileTicketServiceTest.class,
+		BranchTicketServiceTest.class, RedisTicketServiceTest.class, AuthenticationManagerTest.class,
+		SshKeysDispatcherTest.class })
 public class GitBlitSuite {
+
+	public static final File BASEFOLDER = new File("data");
 
 	public static final File REPOSITORIES = new File("data/git");
 
@@ -73,39 +79,51 @@ public class GitBlitSuite {
 	static int port = 8280;
 	static int gitPort = 8300;
 	static int shutdownPort = 8281;
+	static int sshPort = 39418;
 
 	public static String url = "http://localhost:" + port;
 	public static String gitServletUrl = "http://localhost:" + port + "/git";
 	public static String gitDaemonUrl = "git://localhost:" + gitPort;
+	public static String sshDaemonUrl = "ssh://admin@localhost:" + sshPort;
 	public static String account = "admin";
 	public static String password = "admin";
 
 	private static AtomicBoolean started = new AtomicBoolean(false);
 
-	public static Repository getHelloworldRepository() throws Exception {
+	public static Repository getHelloworldRepository() {
 		return getRepository("helloworld.git");
 	}
 
-	public static Repository getTicgitRepository() throws Exception {
+	public static Repository getTicgitRepository() {
 		return getRepository("ticgit.git");
 	}
 
-	public static Repository getJGitRepository() throws Exception {
+	public static Repository getJGitRepository() {
 		return getRepository("test/jgit.git");
 	}
 
-	public static Repository getAmbitionRepository() throws Exception {
+	public static Repository getAmbitionRepository() {
 		return getRepository("test/ambition.git");
 	}
 
-	public static Repository getGitectiveRepository() throws Exception {
+	public static Repository getGitectiveRepository() {
 		return getRepository("test/gitective.git");
 	}
 
-	private static Repository getRepository(String name) throws Exception {
-		File gitDir = FileKey.resolve(new File(REPOSITORIES, name), FS.DETECTED);
-		Repository repository = new FileRepositoryBuilder().setGitDir(gitDir).build();
-		return repository;
+	public static Repository getTicketsTestRepository() {
+		JGitUtils.createRepository(REPOSITORIES, "gb-tickets.git").close();
+		return getRepository("gb-tickets.git");
+	}
+
+	private static Repository getRepository(String name) {
+		try {
+			File gitDir = FileKey.resolve(new File(REPOSITORIES, name), FS.DETECTED);
+			Repository repository = new FileRepositoryBuilder().setGitDir(gitDir).build();
+			return repository;
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return null;
 	}
 
 	public static boolean startGitblit() throws Exception {
@@ -120,10 +138,15 @@ public class GitBlitSuite {
 		Executors.newSingleThreadExecutor().execute(new Runnable() {
 			@Override
 			public void run() {
-				GitBlitServer.main("--httpPort", "" + port, "--httpsPort", "0", "--shutdownPort",
-						"" + shutdownPort, "--gitPort", "" + gitPort, "--repositoriesFolder",
-						"\"" + GitBlitSuite.REPOSITORIES.getAbsolutePath() + "\"", "--userService",
-						GitBlitSuite.USERSCONF.getAbsolutePath(), "--settings", GitBlitSuite.SETTINGS.getAbsolutePath(),
+				GitBlitServer.main(
+						"--httpPort", "" + port,
+						"--httpsPort", "0",
+						"--shutdownPort", "" + shutdownPort,
+						"--gitPort", "" + gitPort,
+						"--sshPort", "" + sshPort,
+						"--repositoriesFolder", GitBlitSuite.REPOSITORIES.getAbsolutePath(),
+						"--userService", GitBlitSuite.USERSCONF.getAbsolutePath(),
+						"--settings", GitBlitSuite.SETTINGS.getAbsolutePath(),
 						"--baseFolder", "data");
 			}
 		});
@@ -179,9 +202,10 @@ public class GitBlitSuite {
 
 	private static void showRemoteBranches(String repositoryName) {
 		try {
-			RepositoryModel model = GitBlit.self().getRepositoryModel(repositoryName);
+			IRepositoryManager repositoryManager = GitblitContext.getManager(IRepositoryManager.class);
+			RepositoryModel model = repositoryManager.getRepositoryModel(repositoryName);
 			model.showRemoteBranches = true;
-			GitBlit.self().updateRepositoryModel(model.name, model, false);
+			repositoryManager.updateRepositoryModel(model.name, model, false);
 		} catch (GitBlitException g) {
 			g.printStackTrace();
 		}
@@ -189,9 +213,10 @@ public class GitBlitSuite {
 
 	private static void automaticallyTagBranchTips(String repositoryName) {
 		try {
-			RepositoryModel model = GitBlit.self().getRepositoryModel(repositoryName);
+			IRepositoryManager repositoryManager = GitblitContext.getManager(IRepositoryManager.class);
+			RepositoryModel model = repositoryManager.getRepositoryModel(repositoryName);
 			model.useIncrementalPushTags = true;
-			GitBlit.self().updateRepositoryModel(model.name, model, false);
+			repositoryManager.updateRepositoryModel(model.name, model, false);
 		} catch (GitBlitException g) {
 			g.printStackTrace();
 		}

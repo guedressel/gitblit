@@ -15,16 +15,13 @@
  */
 package com.gitblit.tests;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-
 import java.util.Date;
 
 import org.junit.Test;
 
 import com.gitblit.utils.TimeUtils;
 
-public class TimeUtilsTest {
+public class TimeUtilsTest extends GitblitUnitTest {
 
 	private Date offset(long subtract) {
 		return new Date(System.currentTimeMillis() - subtract);
@@ -103,9 +100,9 @@ public class TimeUtilsTest {
 
 	@Test
 	public void testFrequency() {
-		assertEquals(5, TimeUtils.convertFrequencyToMinutes("2 mins"));
-		assertEquals(10, TimeUtils.convertFrequencyToMinutes("10 mins"));
-		assertEquals(600, TimeUtils.convertFrequencyToMinutes("10 hours"));
-		assertEquals(14400, TimeUtils.convertFrequencyToMinutes(" 10 days "));
+		assertEquals(5, TimeUtils.convertFrequencyToMinutes("2 mins", 5));
+		assertEquals(10, TimeUtils.convertFrequencyToMinutes("10 mins", 5));
+		assertEquals(600, TimeUtils.convertFrequencyToMinutes("10 hours", 5));
+		assertEquals(14400, TimeUtils.convertFrequencyToMinutes(" 10 days ", 5));
 	}
 }

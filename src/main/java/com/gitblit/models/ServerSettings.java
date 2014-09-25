@@ -37,14 +37,6 @@ public class ServerSettings implements Serializable {
 
 	public List<String> pushScripts;
 
-	public boolean supportsCredentialChanges;
-
-	public boolean supportsDisplayNameChanges;
-
-	public boolean supportsEmailAddressChanges;
-
-	public boolean supportsTeamMembershipChanges;
-
 	public ServerSettings() {
 		settings = new TreeMap<String, SettingModel>();
 	}
@@ -65,5 +57,9 @@ public class ServerSettings implements Serializable {
 
 	public boolean hasKey(String key) {
 		return settings.containsKey(key);
+	}
+
+	public SettingModel remove(String key) {
+		return settings.remove(key);
 	}
 }

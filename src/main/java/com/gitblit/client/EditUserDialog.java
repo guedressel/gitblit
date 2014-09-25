@@ -92,6 +92,8 @@ public class EditUserDialog extends JDialog {
 
 	private JCheckBox notFederatedCheckbox;
 
+	private JCheckBox disabledCheckbox;
+
 	private JTextField organizationalUnitField;
 
 	private JTextField organizationField;
@@ -153,6 +155,7 @@ public class EditUserDialog extends JDialog {
 		notFederatedCheckbox = new JCheckBox(
 				Translation.get("gb.excludeFromFederationDescription"),
 				anUser.excludeFromFederation);
+		disabledCheckbox = new JCheckBox(Translation.get("gb.disableUserDescription"), anUser.disabled);
 
 		organizationalUnitField = new JTextField(anUser.organizationalUnit == null ? "" : anUser.organizationalUnit, 25);
 		organizationField = new JTextField(anUser.organization == null ? "" : anUser.organization, 25);
@@ -161,18 +164,9 @@ public class EditUserDialog extends JDialog {
 		countryCodeField = new JTextField(anUser.countryCode == null ? "" : anUser.countryCode, 15);
 
 		// credentials are optionally controlled by 3rd-party authentication
-		usernameField.setEnabled(settings.supportsCredentialChanges);
-		passwordField.setEnabled(settings.supportsCredentialChanges);
-		confirmPasswordField.setEnabled(settings.supportsCredentialChanges);
-
-		displayNameField.setEnabled(settings.supportsDisplayNameChanges);
-		emailAddressField.setEnabled(settings.supportsEmailAddressChanges);
-
-		organizationalUnitField.setEnabled(settings.supportsDisplayNameChanges);
-		organizationField.setEnabled(settings.supportsDisplayNameChanges);
-		localityField.setEnabled(settings.supportsDisplayNameChanges);
-		stateProvinceField.setEnabled(settings.supportsDisplayNameChanges);
-		countryCodeField.setEnabled(settings.supportsDisplayNameChanges);
+		usernameField.setEnabled(anUser.isLocalAccount());
+		passwordField.setEnabled(anUser.isLocalAccount());
+		confirmPasswordField.setEnabled(anUser.isLocalAccount());
 
 		JPanel fieldsPanel = new JPanel(new GridLayout(0, 1));
 		fieldsPanel.add(newFieldPanel(Translation.get("gb.username"), usernameField));
@@ -185,6 +179,7 @@ public class EditUserDialog extends JDialog {
 		fieldsPanel.add(newFieldPanel(Translation.get("gb.canCreate"), canCreateCheckbox));
 		fieldsPanel.add(newFieldPanel(Translation.get("gb.excludeFromFederation"),
 				notFederatedCheckbox));
+		fieldsPanel.add(newFieldPanel(Translation.get("gb.disableUser"), disabledCheckbox));
 
 		JPanel attributesPanel = new JPanel(new GridLayout(0, 1, 5, 2));
 		attributesPanel.add(newFieldPanel(Translation.get("gb.organizationalUnit") + " (OU)", organizationalUnitField));
@@ -196,7 +191,6 @@ public class EditUserDialog extends JDialog {
 		final Insets _insets = new Insets(5, 5, 5, 5);
 		repositoryPalette = new RegistrantPermissionsPanel(RegistrantType.REPOSITORY);
 		teamsPalette = new JPalette<TeamModel>();
-		teamsPalette.setEnabled(settings.supportsTeamMembershipChanges);
 
 		JPanel fieldsPanelTop = new JPanel(new BorderLayout());
 		fieldsPanelTop.add(fieldsPanel, BorderLayout.NORTH);
@@ -335,6 +329,9 @@ public class EditUserDialog extends JDialog {
 				return false;
 			}
 
+			// change the cookie
+			user.cookie = StringUtils.getSHA1(user.username + password);
+
 			String type = settings.get(Keys.realm.passwordStorage).getString("md5");
 			if (type.equalsIgnoreCase("md5")) {
 				// store MD5 digest of password
@@ -362,6 +359,7 @@ public class EditUserDialog extends JDialog {
 		user.canFork = canForkCheckbox.isSelected();
 		user.canCreate = canCreateCheckbox.isSelected();
 		user.excludeFromFederation = notFederatedCheckbox.isSelected();
+		user.disabled = disabledCheckbox.isSelected();
 
 		user.organizationalUnit = organizationalUnitField.getText().trim();
 		user.organization = organizationField.getText().trim();

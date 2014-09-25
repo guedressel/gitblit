@@ -15,7 +15,6 @@
  */
 package com.gitblit.git;
 
-import java.io.File;
 import java.io.IOException;
 import java.text.MessageFormat;
 
@@ -28,9 +27,11 @@ import org.eclipse.jgit.transport.resolver.ServiceNotEnabledException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.gitblit.GitBlit;
+import com.gitblit.manager.IGitblit;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
+import com.gitblit.transport.git.GitDaemonClient;
+import com.gitblit.transport.ssh.SshDaemonClient;
 
 /**
  * Resolves repositories and grants export access.
@@ -42,8 +43,11 @@ public class RepositoryResolver<X> extends FileResolver<X> {
 
 	private final Logger logger = LoggerFactory.getLogger(RepositoryResolver.class);
 
-	public RepositoryResolver(File repositoriesFolder) {
-		super(repositoriesFolder, true);
+	private final IGitblit gitblit;
+
+	public RepositoryResolver(IGitblit gitblit) {
+		super(gitblit.getRepositoriesFolder(), true);
+		this.gitblit = gitblit;
 	}
 
 	/**
@@ -65,6 +69,9 @@ public class RepositoryResolver<X> extends FileResolver<X> {
 			// git request
 			GitDaemonClient client = (GitDaemonClient) req;
 			client.setRepositoryName(name);
+		} else if (req instanceof SshDaemonClient) {
+			SshDaemonClient client = (SshDaemonClient) req;
+			client.setRepositoryName(name);
 		}
 		return repo;
 	}
@@ -74,10 +81,10 @@ public class RepositoryResolver<X> extends FileResolver<X> {
 	 */
 	@Override
 	protected boolean isExportOk(X req, String repositoryName, Repository db) throws IOException {
-		RepositoryModel model = GitBlit.self().getRepositoryModel(repositoryName);
+		RepositoryModel model = gitblit.getRepositoryModel(repositoryName);
 
+		UserModel user = UserModel.ANONYMOUS;
 		String scheme = null;
-		UserModel user = null;
 		String origin = null;
 
 		if (req instanceof GitDaemonClient) {
@@ -86,16 +93,19 @@ public class RepositoryResolver<X> extends FileResolver<X> {
 			GitDaemonClient client = (GitDaemonClient) req;
 			scheme = "git";
 			origin = client.getRemoteAddress().toString();
-			user = UserModel.ANONYMOUS;
 		} else if (req instanceof HttpServletRequest) {
 			// http/https request
-			HttpServletRequest httpRequest = (HttpServletRequest) req;
-			scheme = httpRequest.getScheme();
-			origin = httpRequest.getRemoteAddr();
-			user = GitBlit.self().authenticate(httpRequest);
+			HttpServletRequest client = (HttpServletRequest) req;
+			scheme = client.getScheme();
+			origin = client.getRemoteAddr();
+			user = gitblit.authenticate(client);
 			if (user == null) {
 				user = UserModel.ANONYMOUS;
 			}
+		} else if (req instanceof SshDaemonClient) {
+			// ssh is always authenticated
+			SshDaemonClient client = (SshDaemonClient) req;
+			user = client.getUser();
 		}
 
 		if (user.canClone(model)) {

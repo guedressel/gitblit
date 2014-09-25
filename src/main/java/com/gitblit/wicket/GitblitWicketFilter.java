@@ -19,17 +19,25 @@ import java.util.Date;
 
 import javax.servlet.http.HttpServletRequest;
 
+import org.apache.wicket.protocol.http.IWebApplicationFactory;
+import org.apache.wicket.protocol.http.WebApplication;
 import org.apache.wicket.protocol.http.WicketFilter;
 import org.apache.wicket.util.string.Strings;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 
-import com.gitblit.GitBlit;
+import com.gitblit.IStoredSettings;
 import com.gitblit.Keys;
+import com.gitblit.dagger.DaggerWicketFilter;
+import com.gitblit.manager.IProjectManager;
+import com.gitblit.manager.IRepositoryManager;
+import com.gitblit.manager.IRuntimeManager;
 import com.gitblit.models.ProjectModel;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
+
+import dagger.ObjectGraph;
 
 /**
  *
@@ -39,7 +47,36 @@ import com.gitblit.utils.StringUtils;
  * @author James Moger
  *
  */
-public class GitblitWicketFilter extends WicketFilter {
+public class GitblitWicketFilter extends DaggerWicketFilter {
+
+	private IStoredSettings settings;
+
+	private IRuntimeManager runtimeManager;
+
+	private IRepositoryManager repositoryManager;
+
+	private IProjectManager projectManager;
+
+	private GitBlitWebApp webapp;
+
+	@Override
+	protected void inject(ObjectGraph dagger) {
+		this.settings = dagger.get(IStoredSettings.class);
+		this.runtimeManager = dagger.get(IRuntimeManager.class);
+		this.repositoryManager = dagger.get(IRepositoryManager.class);
+		this.projectManager = dagger.get(IProjectManager.class);
+		this.webapp = dagger.get(GitBlitWebApp.class);
+	}
+
+	@Override
+	protected IWebApplicationFactory getApplicationFactory() {
+		return new IWebApplicationFactory() {
+			@Override
+			public WebApplication createApplication(WicketFilter filter) {
+				return webapp;
+			}
+		};
+	}
 
 	/**
 	 * Determines the last-modified date of the requested resource.
@@ -50,8 +87,9 @@ public class GitblitWicketFilter extends WicketFilter {
 	@Override
 	protected long getLastModified(final HttpServletRequest servletRequest)	{
 		final String pathInfo = getRelativePath(servletRequest);
-		if (Strings.isEmpty(pathInfo))
+		if (Strings.isEmpty(pathInfo)) {
 			return -1;
+		}
 		long lastModified = super.getLastModified(servletRequest);
 		if (lastModified > -1) {
 			return lastModified;
@@ -77,18 +115,18 @@ public class GitblitWicketFilter extends WicketFilter {
 			commitId = servletRequest.getParameter("h");
 		}
 
-		repo = repo.replace("%2f", "/").replace("%2F", "/").replace(GitBlit.getChar(Keys.web.forwardSlashCharacter, '/'), '/');
+		repo = repo.replace("%2f", "/").replace("%2F", "/").replace(settings.getChar(Keys.web.forwardSlashCharacter, '/'), '/');
 
 		GitBlitWebApp app = (GitBlitWebApp) getWebApplication();
-		int expires = GitBlit.getInteger(Keys.web.pageCacheExpires, 0);
+		int expires = settings.getInteger(Keys.web.pageCacheExpires, 0);
 		if (!StringUtils.isEmpty(page) && app.isCacheablePage(page) && expires > 0) {
 			// page can be cached by the browser
 			CacheControl cacheControl = app.getCacheControl(page);
-			Date bootDate = GitBlit.getBootDate();
+			Date bootDate = runtimeManager.getBootDate();
 			switch (cacheControl.value()) {
 			case ACTIVITY:
 				// returns the last activity date of the server
-				Date activityDate = GitBlit.getLastActivityDate();
+				Date activityDate = repositoryManager.getLastActivityDate();
 				if (activityDate != null) {
 					return activityDate.after(bootDate) ? activityDate.getTime() : bootDate.getTime();
 				}
@@ -98,7 +136,7 @@ public class GitblitWicketFilter extends WicketFilter {
 				return bootDate.getTime();
 			case PROJECT:
 				// return the latest change date for the project OR the boot date
-				ProjectModel project = GitBlit.self().getProjectModel(StringUtils.getRootPath(repo));
+				ProjectModel project = projectManager.getProjectModel(StringUtils.getRootPath(repo));
 				if (project != null) {
 					return project.lastChange.after(bootDate) ? project.lastChange.getTime() : bootDate.getTime();
 				}
@@ -106,7 +144,7 @@ public class GitblitWicketFilter extends WicketFilter {
 			case REPOSITORY:
 				// return the lastest change date for the repository OR the boot
 				// date, whichever is latest
-				RepositoryModel repository = GitBlit.self().getRepositoryModel(repo);
+				RepositoryModel repository = repositoryManager.getRepositoryModel(repo);
 				if (repository != null && repository.lastChange != null) {
 					return repository.lastChange.after(bootDate) ? repository.lastChange.getTime() : bootDate.getTime();
 				}
@@ -121,7 +159,7 @@ public class GitblitWicketFilter extends WicketFilter {
 					Repository r = null;
 					try {
 						// return the timestamp of the associated commit
-						r = GitBlit.self().getRepository(repo);
+						r = repositoryManager.getRepository(repo);
 						if (r != null) {
 							RevCommit commit = JGitUtils.getCommit(r, commitId);
 							if (commit != null) {

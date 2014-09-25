@@ -58,6 +58,8 @@ import javax.swing.KeyStroke;
 import javax.swing.ListCellRenderer;
 import javax.swing.ScrollPaneConstants;
 
+import org.eclipse.jgit.lib.Repository;
+
 import com.gitblit.Constants.AccessRestrictionType;
 import com.gitblit.Constants.AuthorizationControl;
 import com.gitblit.Constants.FederationStrategy;
@@ -88,7 +90,13 @@ public class EditRepositoryDialog extends JDialog {
 
 	private JTextField descriptionField;
 
-	private JCheckBox useDocs;
+	private JCheckBox acceptNewPatchsets;
+
+	private JCheckBox acceptNewTickets;
+
+	private JCheckBox requireApproval;
+
+	private JComboBox mergeToField;
 
 	private JCheckBox useIncrementalPushTags;
 
@@ -207,6 +215,22 @@ public class EditRepositoryDialog extends JDialog {
 
 		ownersPalette = new JPalette<String>(true);
 
+		acceptNewTickets = new JCheckBox(Translation.get("gb.acceptsNewTicketsDescription"),
+				anRepository.acceptNewTickets);
+		acceptNewPatchsets = new JCheckBox(Translation.get("gb.acceptsNewPatchsetsDescription"),
+				anRepository.acceptNewPatchsets);
+		requireApproval = new JCheckBox(Translation.get("gb.requireApprovalDescription"),
+				anRepository.requireApproval);
+
+		if (ArrayUtils.isEmpty(anRepository.availableRefs)) {
+			mergeToField = new JComboBox();
+			mergeToField.setEnabled(false);
+		} else {
+			mergeToField = new JComboBox(
+					anRepository.availableRefs.toArray());
+			mergeToField.setSelectedItem(anRepository.mergeTo);
+		}
+
 		useIncrementalPushTags = new JCheckBox(Translation.get("gb.useIncrementalPushTagsDescription"),
 				anRepository.useIncrementalPushTags);
 		showRemoteBranches = new JCheckBox(
@@ -300,8 +324,13 @@ public class EditRepositoryDialog extends JDialog {
 		fieldsPanel.add(newFieldPanel(Translation.get("gb.gcPeriod"), gcPeriod));
 		fieldsPanel.add(newFieldPanel(Translation.get("gb.gcThreshold"), gcThreshold));
 
-		fieldsPanel
-				.add(newFieldPanel(Translation.get("gb.enableDocs"), useDocs));
+		fieldsPanel.add(newFieldPanel(Translation.get("gb.acceptsNewTickets"),
+				acceptNewTickets));
+		fieldsPanel.add(newFieldPanel(Translation.get("gb.acceptsNewPatchsets"),
+				acceptNewPatchsets));
+		fieldsPanel.add(newFieldPanel(Translation.get("gb.requireApproval"),
+				requireApproval));
+		fieldsPanel.add(newFieldPanel(Translation.get("gb.mergeTo"), mergeToField));
 		fieldsPanel
 		.add(newFieldPanel(Translation.get("gb.enableIncrementalPushTags"), useIncrementalPushTags));
 		fieldsPanel.add(newFieldPanel(Translation.get("gb.showRemoteBranches"),
@@ -556,6 +585,11 @@ public class EditRepositoryDialog extends JDialog {
 				: headRefField.getSelectedItem().toString();
 		repository.gcPeriod = (Integer) gcPeriod.getSelectedItem();
 		repository.gcThreshold = gcThreshold.getText();
+		repository.acceptNewPatchsets = acceptNewPatchsets.isSelected();
+		repository.acceptNewTickets = acceptNewTickets.isSelected();
+		repository.requireApproval = requireApproval.isSelected();
+		repository.mergeTo = mergeToField.getSelectedItem() == null ? null
+				: Repository.shortenRefName(mergeToField.getSelectedItem().toString());
 		repository.useIncrementalPushTags = useIncrementalPushTags.isSelected();
 		repository.showRemoteBranches = showRemoteBranches.isSelected();
 		repository.skipSizeCalculation = skipSizeCalculation.isSelected();

@@ -18,6 +18,7 @@ package com.gitblit;
 import java.util.Collection;
 import java.util.List;
 
+import com.gitblit.manager.IRuntimeManager;
 import com.gitblit.models.TeamModel;
 import com.gitblit.models.UserModel;
 
@@ -35,87 +36,35 @@ public interface IUserService {
 	 * retrieve settings from gitblit.properties or the web.xml file without
 	 * relying on the GitBlit static singleton.
 	 *
-	 * @param settings
-	 * @since 0.7.0
+	 * @param runtimeManager
+	 * @since 1.4.0
 	 */
-	void setup(IStoredSettings settings);
-
-	/**
-	 * Does the user service support changes to credentials?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	boolean supportsCredentialChanges();
-
-	/**
-	 * Does the user service support changes to user display name?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	boolean supportsDisplayNameChanges();
-
-	/**
-	 * Does the user service support changes to user email address?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	boolean supportsEmailAddressChanges();
-
-	/**
-	 * Does the user service support changes to team memberships?
-	 *
-	 * @return true or false
-	 * @since 1.0.0
-	 */
-	boolean supportsTeamMembershipChanges();
-
-	/**
-	 * Does the user service support cookie authentication?
-	 *
-	 * @return true or false
-	 */
-	boolean supportsCookies();
+	void setup(IRuntimeManager runtimeManager);
 
 	/**
 	 * Returns the cookie value for the specified user.
 	 *
 	 * @param model
 	 * @return cookie value
+ 	 * @since 0.5.0
 	 */
 	String getCookie(UserModel model);
 
 	/**
-	 * Authenticate a user based on their cookie.
+	 * Retrieve a user object for the specified cookie.
 	 *
 	 * @param cookie
 	 * @return a user object or null
+ 	 * @since 0.5.0
 	 */
-	UserModel authenticate(char[] cookie);
-
-	/**
-	 * Authenticate a user based on a username and password.
-	 *
-	 * @param username
-	 * @param password
-	 * @return a user object or null
-	 */
-	UserModel authenticate(String username, char[] password);
-
-	/**
-	 * Logout a user.
-	 *
-	 * @param user
-	 */
-	void logout(UserModel user);
+	UserModel getUserModel(char[] cookie);
 
 	/**
 	 * Retrieve the user object for the specified username.
 	 *
 	 * @param username
 	 * @return a user object or null
+ 	 * @since 0.5.0
 	 */
 	UserModel getUserModel(String username);
 
@@ -124,6 +73,7 @@ public interface IUserService {
 	 *
 	 * @param model
 	 * @return true if update is successful
+ 	 * @since 0.5.0
 	 */
 	boolean updateUserModel(UserModel model);
 
@@ -145,6 +95,7 @@ public interface IUserService {
 	 * @param model
 	 *            the user object to use for username
 	 * @return true if update is successful
+ 	 * @since 0.5.0
 	 */
 	boolean updateUserModel(String username, UserModel model);
 
@@ -153,6 +104,7 @@ public interface IUserService {
 	 *
 	 * @param model
 	 * @return true if successful
+ 	 * @since 0.5.0
 	 */
 	boolean deleteUserModel(UserModel model);
 
@@ -161,6 +113,7 @@ public interface IUserService {
 	 *
 	 * @param username
 	 * @return true if successful
+ 	 * @since 0.5.0
 	 */
 	boolean deleteUser(String username);
 
@@ -168,6 +121,7 @@ public interface IUserService {
 	 * Returns the list of all users available to the login service.
 	 *
 	 * @return list of all usernames
+ 	 * @since 0.5.0
 	 */
 	List<String> getAllUsernames();
 
@@ -204,20 +158,7 @@ public interface IUserService {
 	 * @return list of all usernames that can bypass the access restriction
 	 * @since 0.8.0
 	 */
-	List<String> getTeamnamesForRepositoryRole(String role);
-
-	/**
-	 * Sets the list of all teams who are allowed to bypass the access
-	 * restriction placed on the specified repository.
-	 *
-	 * @param role
-	 *            the repository name
-	 * @param teamnames
-	 * @return true if successful
-	 * @since 0.8.0
-	 */
-	@Deprecated
-	boolean setTeamnamesForRepositoryRole(String role, List<String> teamnames);
+	List<String> getTeamNamesForRepositoryRole(String role);
 
 	/**
 	 * Retrieve the team object for the specified team name.
@@ -289,23 +230,12 @@ public interface IUserService {
 	List<String> getUsernamesForRepositoryRole(String role);
 
 	/**
-	 * Sets the list of all uses who are allowed to bypass the access
-	 * restriction placed on the specified repository.
-	 *
-	 * @param role
-	 *            the repository name
-	 * @param usernames
-	 * @return true if successful
-	 */
-	@Deprecated
-	boolean setUsernamesForRepositoryRole(String role, List<String> usernames);
-
-	/**
 	 * Renames a repository role.
 	 *
 	 * @param oldRole
 	 * @param newRole
 	 * @return true if successful
+ 	 * @since 0.5.0
 	 */
 	boolean renameRepositoryRole(String oldRole, String newRole);
 
@@ -314,6 +244,7 @@ public interface IUserService {
 	 *
 	 * @param role
 	 * @return true if successful
+ 	 * @since 0.5.0
 	 */
 	boolean deleteRepositoryRole(String role);
 

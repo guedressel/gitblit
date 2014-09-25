@@ -34,10 +34,12 @@ import org.apache.wicket.markup.html.basic.Label;
 import org.apache.wicket.markup.html.panel.Fragment;
 import org.eclipse.jgit.lib.Repository;
 
-import com.gitblit.GitBlit;
 import com.gitblit.Keys;
 import com.gitblit.models.DailyLogEntry;
+import com.gitblit.models.Menu.ParameterMenuItem;
+import com.gitblit.models.NavLink.DropDownPageMenuNavLink;
 import com.gitblit.models.Metric;
+import com.gitblit.models.NavLink;
 import com.gitblit.models.RefLogEntry;
 import com.gitblit.models.RepositoryCommit;
 import com.gitblit.models.RepositoryModel;
@@ -46,12 +48,9 @@ import com.gitblit.utils.ArrayUtils;
 import com.gitblit.utils.RefLogUtils;
 import com.gitblit.utils.StringUtils;
 import com.gitblit.wicket.GitBlitWebApp;
-import com.gitblit.wicket.PageRegistration;
-import com.gitblit.wicket.PageRegistration.DropDownMenuItem;
-import com.gitblit.wicket.PageRegistration.DropDownMenuRegistration;
-import com.gitblit.wicket.charting.GoogleChart;
-import com.gitblit.wicket.charting.GoogleCharts;
-import com.gitblit.wicket.charting.GooglePieChart;
+import com.gitblit.wicket.charting.Chart;
+import com.gitblit.wicket.charting.Charts;
+import com.gitblit.wicket.charting.Flotr2Charts;
 import com.gitblit.wicket.panels.DigestsPanel;
 import com.gitblit.wicket.panels.LinkPanel;
 
@@ -83,7 +82,7 @@ public abstract class DashboardPage extends RootPage {
 				continue;
 			}
 			if (model.hasCommits && model.lastChange.after(minimumDate)) {
-				Repository repository = GitBlit.self().getRepository(model.name);
+				Repository repository = app().repositories().getRepository(model.name);
 				List<DailyLogEntry> entries = RefLogUtils.getDailyLogByRef(model.name, repository, minimumDate, timezone);
 				digests.addAll(entries);
 				repository.close();
@@ -123,7 +122,7 @@ public abstract class DashboardPage extends RootPage {
 		if (!ArrayUtils.isEmpty(digests)) {
 			// aggregate author exclusions
 			Set<String> authorExclusions = new TreeSet<String>();
-			for (String author : GitBlit.getStrings(Keys.web.metricAuthorExclusions)) {
+			for (String author : app().settings().getStrings(Keys.web.metricAuthorExclusions)) {
 				authorExclusions.add(author.toLowerCase());
 			}
 			for (RepositoryModel model : repositories) {
@@ -142,21 +141,21 @@ public abstract class DashboardPage extends RootPage {
 	}
 
 	@Override
-	protected void addDropDownMenus(List<PageRegistration> pages) {
+	protected void addDropDownMenus(List<NavLink> navLinks) {
 		PageParameters params = getPageParameters();
 
-		DropDownMenuRegistration menu = new DropDownMenuRegistration("gb.filters",
-				GitBlitWebApp.HOME_PAGE_CLASS);
+		DropDownPageMenuNavLink menu = new DropDownPageMenuNavLink("gb.filters",
+				GitBlitWebApp.get().getHomePage());
 
 		// preserve repository filter option on time choices
 		menu.menuItems.addAll(getTimeFilterItems(params));
 
 		if (menu.menuItems.size() > 0) {
 			// Reset Filter
-			menu.menuItems.add(new DropDownMenuItem(getString("gb.reset"), null, null));
+			menu.menuItems.add(new ParameterMenuItem(getString("gb.reset")));
 		}
 
-		pages.add(menu);
+		navLinks.add(menu);
 	}
 
 
@@ -217,21 +216,23 @@ public abstract class DashboardPage extends RootPage {
 		frag.add(new Label("feedheader", MessageFormat.format(headerPattern,
 				daysBack, totalCommits, authorMetrics.size())));
 
-		if (GitBlit.getBoolean(Keys.web.generateActivityGraph, true)) {
+		if (app().settings().getBoolean(Keys.web.generateActivityGraph, true)) {
 			// build google charts
-			GoogleCharts charts = new GoogleCharts();
+			Charts charts = new Flotr2Charts();
 
 			// active repositories pie chart
-			GoogleChart chart = new GooglePieChart("chartRepositories", getString("gb.activeRepositories"),
+			Chart chart = charts.createPieChart("chartRepositories", getString("gb.activeRepositories"),
 					getString("gb.repository"), getString("gb.commits"));
 			for (Metric metric : repositoryMetrics.values()) {
 				chart.addValue(metric.name, metric.count);
 			}
 			chart.setShowLegend(false);
+			String url = urlFor(SummaryPage.class, null).toString() + "?r=";
+			chart.setClickUrl(url);
 			charts.addChart(chart);
 
 			// active authors pie chart
-			chart = new GooglePieChart("chartAuthors", getString("gb.activeAuthors"),
+			chart = charts.createPieChart("chartAuthors", getString("gb.activeAuthors"),
 					getString("gb.author"), getString("gb.commits"));
 			for (Metric metric : authorMetrics.values()) {
 				chart.addValue(metric.name, metric.count);

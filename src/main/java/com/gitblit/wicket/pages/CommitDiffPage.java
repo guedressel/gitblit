@@ -31,10 +31,10 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 
 import com.gitblit.Constants;
-import com.gitblit.GitBlit;
 import com.gitblit.models.GitNote;
 import com.gitblit.models.PathModel.PathChangeModel;
 import com.gitblit.models.SubmoduleModel;
+import com.gitblit.servlet.RawServlet;
 import com.gitblit.utils.DiffUtils;
 import com.gitblit.utils.DiffUtils.DiffOutput;
 import com.gitblit.utils.DiffUtils.DiffOutputType;
@@ -108,7 +108,7 @@ public class CommitDiffPage extends RepositoryPage {
 				item.add(new GravatarImage("noteAuthorAvatar", entry.notesRef.getAuthorIdent()));
 				item.add(WicketUtils.createTimestampLabel("authorDate", entry.notesRef
 						.getAuthorIdent().getWhen(), getTimeZone(), getTimeUtils()));
-				item.add(new Label("noteContent", GitBlit.self().processPlainCommitMessage(repositoryName,
+				item.add(new Label("noteContent", bugtraqProcessor().processPlainCommitMessage(getRepository(), repositoryName,
 						entry.content)).setEscapeModelStrings(false));
 			}
 		};
@@ -171,8 +171,8 @@ public class CommitDiffPage extends RepositoryPage {
 					item.add(new BookmarkablePageLink<Void>("view", BlobPage.class, WicketUtils
 							.newPathParameter(repositoryName, entry.commitId, entry.path))
 							.setEnabled(!entry.changeType.equals(ChangeType.DELETE)));
-					item.add(new BookmarkablePageLink<Void>("raw", RawPage.class, WicketUtils
-							.newPathParameter(repositoryName, entry.commitId, entry.path))
+					String rawUrl = RawServlet.asLink(getContextUrl(), repositoryName, entry.commitId, entry.path);
+					item.add(new ExternalLink("raw", rawUrl)
 							.setEnabled(!entry.changeType.equals(ChangeType.DELETE)));
 					item.add(new BookmarkablePageLink<Void>("blame", BlamePage.class, WicketUtils
 							.newPathParameter(repositoryName, entry.commitId, entry.path))
@@ -194,6 +194,11 @@ public class CommitDiffPage extends RepositoryPage {
 	@Override
 	protected String getPageName() {
 		return getString("gb.commitdiff");
+	}
+
+	@Override
+	protected boolean isCommitPage() {
+		return true;
 	}
 
 	@Override

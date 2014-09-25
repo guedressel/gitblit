@@ -15,27 +15,27 @@
  */
 package com.gitblit.tests;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import org.eclipse.jgit.lib.Repository;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import com.gitblit.LuceneExecutor;
+import com.gitblit.Keys;
+import com.gitblit.manager.RepositoryManager;
+import com.gitblit.manager.RuntimeManager;
+import com.gitblit.manager.UserManager;
 import com.gitblit.models.RefModel;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.SearchResult;
+import com.gitblit.service.LuceneService;
 import com.gitblit.tests.mock.MemorySettings;
 import com.gitblit.utils.FileUtils;
 import com.gitblit.utils.JGitUtils;
+import com.gitblit.utils.XssFilter;
+import com.gitblit.utils.XssFilter.AllowXssFilter;
 
 /**
  * Tests Lucene indexing and querying.
@@ -43,14 +43,18 @@ import com.gitblit.utils.JGitUtils;
  * @author James Moger
  *
  */
-public class LuceneExecutorTest {
+public class LuceneExecutorTest extends GitblitUnitTest {
 
-	LuceneExecutor lucene;
+	LuceneService lucene;
 
-	private LuceneExecutor newLuceneExecutor() {
-		Map<String, Object> map = new HashMap<String, Object>();
-		MemorySettings settings = new MemorySettings(map);
-		return new LuceneExecutor(settings, GitBlitSuite.REPOSITORIES);
+	private LuceneService newLuceneExecutor() {
+		MemorySettings settings = new MemorySettings();
+		settings.put(Keys.git.repositoriesFolder, GitBlitSuite.REPOSITORIES);
+		XssFilter xssFilter = new AllowXssFilter();
+		RuntimeManager runtime = new RuntimeManager(settings, xssFilter, GitBlitSuite.BASEFOLDER).start();
+		UserManager users = new UserManager(runtime, null).start();
+		RepositoryManager repos = new RepositoryManager(runtime, null, users);
+		return new LuceneService(settings, repos);
 	}
 
 	private RepositoryModel newRepositoryModel(Repository repository) {
@@ -77,7 +81,7 @@ public class LuceneExecutorTest {
 	}
 
 	@Test
-	public void testIndex() throws Exception {
+	public void testIndex() {
 		// reindex helloworld
 		Repository repository = GitBlitSuite.getHelloworldRepository();
 		RepositoryModel model = newRepositoryModel(repository);

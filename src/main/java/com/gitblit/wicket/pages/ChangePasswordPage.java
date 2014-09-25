@@ -23,9 +23,9 @@ import org.apache.wicket.markup.html.form.PasswordTextField;
 import org.apache.wicket.markup.html.form.StatelessForm;
 import org.apache.wicket.model.IModel;
 import org.apache.wicket.model.Model;
+import org.apache.wicket.protocol.http.WebRequest;
 import org.apache.wicket.protocol.http.WebResponse;
 
-import com.gitblit.GitBlit;
 import com.gitblit.GitBlitException;
 import com.gitblit.Keys;
 import com.gitblit.models.UserModel;
@@ -45,16 +45,16 @@ public class ChangePasswordPage extends RootSubPage {
 			throw new RestartResponseException(getApplication().getHomePage());
 		}
 
-		if (!GitBlit.getBoolean(Keys.web.authenticateAdminPages, true)
-				&& !GitBlit.getBoolean(Keys.web.authenticateViewPages, false)) {
+		if (!app().settings().getBoolean(Keys.web.authenticateAdminPages, true)
+				&& !app().settings().getBoolean(Keys.web.authenticateViewPages, false)) {
 			// no authentication enabled
 			throw new RestartResponseException(getApplication().getHomePage());
 		}
 
 		UserModel user = GitBlitWebSession.get().getUser();
-		if (!GitBlit.self().supportsCredentialChanges(user)) {
+		if (!app().authentication().supportsCredentialChanges(user)) {
 			error(MessageFormat.format(getString("gb.userServiceDoesNotPermitPasswordChanges"),
-					GitBlit.getString(Keys.realm.userService, "${baseFolder}/users.conf")), true);
+					app().settings().getString(Keys.realm.userService, "${baseFolder}/users.conf")), true);
 		}
 
 		setupPage(getString("gb.changePassword"), user.username);
@@ -74,7 +74,7 @@ public class ChangePasswordPage extends RootSubPage {
 				}
 
 				// ensure password satisfies minimum length requirement
-				int minLength = GitBlit.getInteger(Keys.realm.minPasswordLength, 5);
+				int minLength = app().settings().getInteger(Keys.realm.minPasswordLength, 5);
 				if (minLength < 4) {
 					minLength = 4;
 				}
@@ -86,7 +86,7 @@ public class ChangePasswordPage extends RootSubPage {
 				UserModel user = GitBlitWebSession.get().getUser();
 
 				// convert to MD5 digest, if appropriate
-				String type = GitBlit.getString(Keys.realm.passwordStorage, "md5");
+				String type = app().settings().getString(Keys.realm.passwordStorage, "md5");
 				if (type.equalsIgnoreCase("md5")) {
 					// store MD5 digest of password
 					password = StringUtils.MD5_TYPE + StringUtils.getMD5(password);
@@ -98,10 +98,12 @@ public class ChangePasswordPage extends RootSubPage {
 
 				user.password = password;
 				try {
-					GitBlit.self().updateUserModel(user.username, user, false);
-					if (GitBlit.getBoolean(Keys.web.allowCookieAuthentication, false)) {
+					app().gitblit().reviseUser(user.username, user);
+					if (app().settings().getBoolean(Keys.web.allowCookieAuthentication, false)) {
+						WebRequest request = (WebRequest) getRequestCycle().getRequest();
 						WebResponse response = (WebResponse) getRequestCycle().getResponse();
-						GitBlit.self().setCookie(response, user);
+						app().authentication().setCookie(request.getHttpServletRequest(),
+								response.getHttpServletResponse(), user);
 					}
 				} catch (GitBlitException e) {
 					error(e.getMessage());

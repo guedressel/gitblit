@@ -15,10 +15,6 @@
  */
 package com.gitblit.tests;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-
 import java.io.File;
 import java.io.IOException;
 
@@ -31,7 +27,7 @@ import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.TeamModel;
 import com.gitblit.models.UserModel;
 
-public class UserServiceTest {
+public class UserServiceTest extends GitblitUnitTest {
 
 	@Test
 	public void testConfigUserService() throws IOException {
@@ -89,14 +85,9 @@ public class UserServiceTest {
 		assertTrue(newUser.hasRepositoryPermission("repo2"));
 		assertTrue(newUser.hasRepositoryPermission("sub/repo3"));
 
-		// confirm authentication of test user
-		UserModel testUser = service.authenticate("test", "testPassword".toCharArray());
-		assertEquals("test", testUser.username);
-		assertEquals("testPassword", testUser.password);
-
 		// delete a repository role and confirm role removal from test user
 		service.deleteRepositoryRole("repo2");
-		testUser = service.getUserModel("test");
+		UserModel testUser = service.getUserModel("test");
 		assertEquals(2, testUser.permissions.size());
 
 		// delete garbage user and confirm user count

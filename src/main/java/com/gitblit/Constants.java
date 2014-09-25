@@ -52,6 +52,8 @@ public class Constants {
 
 	public static final String DEFAULT_USER_REPOSITORY_PREFIX = "~";
 
+	public static final String R_PATH = "/r/";
+
 	public static final String GIT_PATH = "/git/";
 
 	public static final String ZIP_PATH = "/zip/";
@@ -66,9 +68,13 @@ public class Constants {
 
 	public static final String SPARKLESHARE_INVITE_PATH = "/sparkleshare/";
 
+	public static final String RAW_PATH = "/raw/";
+
 	public static final String BRANCH_GRAPH_PATH = "/graph/";
 
-	public static final String BORDER = "***********************************************************";
+	public static final String BORDER = "*****************************************************************";
+
+	public static final String BORDER2 = "#################################################################";
 
 	public static final String FEDERATION_USER = "$gitblit";
 
@@ -96,7 +102,7 @@ public class Constants {
 
 	public static final String HEAD = "HEAD";
 
-	public static final String R_GITBLIT = "refs/gitblit/";
+	public static final String R_META = "refs/meta/";
 
 	public static final String R_HEADS = "refs/heads/";
 
@@ -104,11 +110,25 @@ public class Constants {
 
 	public static final String R_CHANGES = "refs/changes/";
 
-	public static final String R_PULL= "refs/pull/";
+	public static final String R_PULL = "refs/pull/";
 
 	public static final String R_TAGS = "refs/tags/";
 
 	public static final String R_REMOTES = "refs/remotes/";
+
+	public static final String R_FOR = "refs/for/";
+
+	public static final String R_TICKET = "refs/heads/ticket/";
+
+	public static final String R_TICKETS_PATCHSETS = "refs/tickets/";
+
+	public static final String R_MASTER = "refs/heads/master";
+
+	public static final String MASTER = "master";
+
+	public static final String R_DEVELOP = "refs/heads/develop";
+
+	public static final String DEVELOP = "develop";
 
 	public static String getVersion() {
 		String v = Constants.class.getPackage().getImplementationVersion();
@@ -338,9 +358,10 @@ public class Constants {
 	 * a client.
 	 */
 	public static enum RpcRequest {
-		// Order is important here.  anything above LIST_SETTINGS requires
+		// Order is important here.  anything after LIST_SETTINGS requires
 		// administrator privileges and web.allowRpcManagement.
-		CLEAR_REPOSITORY_CACHE, GET_PROTOCOL, LIST_REPOSITORIES, LIST_BRANCHES, GET_USER, LIST_SETTINGS,
+		CLEAR_REPOSITORY_CACHE, REINDEX_TICKETS, GET_PROTOCOL, LIST_REPOSITORIES, LIST_BRANCHES, GET_USER,
+		FORK_REPOSITORY, LIST_SETTINGS,
 		CREATE_REPOSITORY, EDIT_REPOSITORY, DELETE_REPOSITORY,
 		LIST_USERS, CREATE_USER, EDIT_USER, DELETE_USER,
 		LIST_TEAMS, CREATE_TEAM, EDIT_TEAM, DELETE_TEAM,
@@ -390,12 +411,33 @@ public class Constants {
 	}
 
 	/**
+	 * Enumeration of the feed content object types.
+	 */
+	public static enum FeedObjectType {
+		COMMIT, TAG;
+
+		public static FeedObjectType forName(String name) {
+			for (FeedObjectType type : values()) {
+				if (type.name().equalsIgnoreCase(name)) {
+					return type;
+				}
+			}
+			return COMMIT;
+		}
+
+		@Override
+		public String toString() {
+			return name().toLowerCase();
+		}
+	}
+
+	/**
 	 * The types of objects that can be indexed and queried.
 	 */
 	public static enum SearchObjectType {
 		commit, blob;
 
-		static SearchObjectType fromName(String name) {
+		public static SearchObjectType fromName(String name) {
 			for (SearchObjectType value : values()) {
 				if (value.name().equals(name)) {
 					return value;
@@ -412,6 +454,8 @@ public class Constants {
 		NONE("N"), EXCLUDE("X"), VIEW("V"), CLONE("R"), PUSH("RW"), CREATE("RWC"), DELETE("RWD"), REWIND("RW+"), OWNER("RW+");
 
 		public static final AccessPermission [] NEWPERMISSIONS = { EXCLUDE, VIEW, CLONE, PUSH, CREATE, DELETE, REWIND };
+
+		public static final AccessPermission [] SSHPERMISSIONS = { VIEW, CLONE, PUSH };
 
 		public static AccessPermission LEGACY = REWIND;
 
@@ -491,7 +535,7 @@ public class Constants {
 	}
 
 	public static enum AuthenticationType {
-		CREDENTIALS, COOKIE, CERTIFICATE, CONTAINER;
+		PUBLIC_KEY, CREDENTIALS, COOKIE, CERTIFICATE, CONTAINER;
 
 		public boolean isStandard() {
 			return ordinal() <= COOKIE.ordinal();
@@ -499,7 +543,16 @@ public class Constants {
 	}
 
 	public static enum AccountType {
-		LOCAL, EXTERNAL, LDAP, REDMINE, SALESFORCE, WINDOWS, PAM, HTPASSWD;
+		LOCAL, EXTERNAL, CONTAINER, LDAP, REDMINE, SALESFORCE, WINDOWS, PAM, HTPASSWD;
+
+		public static AccountType fromString(String value) {
+			for (AccountType type : AccountType.values()) {
+				if (type.name().equalsIgnoreCase(value)) {
+					return type;
+				}
+			}
+			return AccountType.LOCAL;
+		}
 
 		public boolean isLocal() {
 			return this == LOCAL;
@@ -516,6 +569,30 @@ public class Constants {
 				}
 			}
 			return CommitMessageRenderer.PLAIN;
+		}
+	}
+
+	public static enum Transport {
+		// ordered for url advertisements, assuming equal access permissions
+		SSH, HTTPS, HTTP, GIT;
+
+		public static Transport fromString(String value) {
+			for (Transport t : values()) {
+				if (t.name().equalsIgnoreCase(value)) {
+					return t;
+				}
+			}
+			return null;
+		}
+
+		public static Transport fromUrl(String url) {
+			int delim = url.indexOf("://");
+			if (delim == -1) {
+				// if no protocol is specified, SSH is assumed by git clients
+				return SSH;
+			}
+			String scheme = url.substring(0, delim);
+			return fromString(scheme);
 		}
 	}
 

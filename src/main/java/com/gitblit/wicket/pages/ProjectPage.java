@@ -25,12 +25,16 @@ import org.apache.wicket.PageParameters;
 import org.apache.wicket.markup.html.basic.Label;
 import org.apache.wicket.markup.html.link.ExternalLink;
 
-import com.gitblit.GitBlit;
 import com.gitblit.Keys;
-import com.gitblit.SyndicationServlet;
+import com.gitblit.models.Menu.MenuDivider;
+import com.gitblit.models.Menu.MenuItem;
+import com.gitblit.models.Menu.ParameterMenuItem;
+import com.gitblit.models.NavLink.DropDownPageMenuNavLink;
+import com.gitblit.models.NavLink;
 import com.gitblit.models.ProjectModel;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
+import com.gitblit.servlet.SyndicationServlet;
 import com.gitblit.utils.MarkdownUtils;
 import com.gitblit.utils.StringUtils;
 import com.gitblit.wicket.CacheControl;
@@ -38,9 +42,6 @@ import com.gitblit.wicket.CacheControl.LastModified;
 import com.gitblit.wicket.GitBlitWebApp;
 import com.gitblit.wicket.GitBlitWebSession;
 import com.gitblit.wicket.GitblitRedirectException;
-import com.gitblit.wicket.PageRegistration;
-import com.gitblit.wicket.PageRegistration.DropDownMenuItem;
-import com.gitblit.wicket.PageRegistration.DropDownMenuRegistration;
 import com.gitblit.wicket.WicketUtils;
 import com.gitblit.wicket.panels.FilterableRepositoryList;
 
@@ -87,13 +88,13 @@ public class ProjectPage extends DashboardPage {
 	private void setup(PageParameters params) {
 		setupPage("", "");
 		// check to see if we should display a login message
-		boolean authenticateView = GitBlit.getBoolean(Keys.web.authenticateViewPages, true);
+		boolean authenticateView = app().settings().getBoolean(Keys.web.authenticateViewPages, true);
 		if (authenticateView && !GitBlitWebSession.get().isLoggedIn()) {
 			authenticationError("Please login");
 			return;
 		}
 
-		String projectName = WicketUtils.getProjectName(params);
+		String projectName = params == null ? null : WicketUtils.getProjectName(params);
 		if (StringUtils.isEmpty(projectName)) {
 			throw new GitblitRedirectException(GitBlitWebApp.get().getHomePage());
 		}
@@ -130,12 +131,14 @@ public class ProjectPage extends DashboardPage {
 		}
 		int daysBack = params == null ? 0 : WicketUtils.getDaysBack(params);
 		if (daysBack < 1) {
-			daysBack = GitBlit.getInteger(Keys.web.activityDuration, 7);
+			daysBack = app().settings().getInteger(Keys.web.activityDuration, 7);
 		}
 		// reset the daysback parameter so that we have a complete project
 		// repository list.  the recent activity will be built up by the
 		// reflog utils.
-		params.remove("db");
+		if (params != null) {
+			params.remove("db");
+		}
 
 		List<RepositoryModel> repositories = getRepositories(params);
 		Collections.sort(repositories, new Comparator<RepositoryModel>() {
@@ -158,10 +161,10 @@ public class ProjectPage extends DashboardPage {
 	}
 
 	@Override
-	protected void addDropDownMenus(List<PageRegistration> pages) {
+	protected void addDropDownMenus(List<NavLink> navLinks) {
 		PageParameters params = getPageParameters();
 
-		DropDownMenuRegistration menu = new DropDownMenuRegistration("gb.filters",
+		DropDownPageMenuNavLink menu = new DropDownPageMenuNavLink("gb.filters",
 				ProjectPage.class);
 		// preserve time filter option on repository choices
 		menu.menuItems.addAll(getRepositoryFilterItems(params));
@@ -171,22 +174,22 @@ public class ProjectPage extends DashboardPage {
 
 		if (menu.menuItems.size() > 0) {
 			// Reset Filter
-			menu.menuItems.add(new DropDownMenuItem(getString("gb.reset"), "p", WicketUtils.getProjectName(params)));
+			menu.menuItems.add(new ParameterMenuItem(getString("gb.reset"), "p", WicketUtils.getProjectName(params)));
 		}
 
-		pages.add(menu);
+		navLinks.add(menu);
 
-		DropDownMenuRegistration projects = new DropDownMenuRegistration("gb.projects",
+		DropDownPageMenuNavLink projects = new DropDownPageMenuNavLink("gb.projects",
 				ProjectPage.class);
 		projects.menuItems.addAll(getProjectsMenu());
-		pages.add(projects);
+		navLinks.add(projects);
 	}
 
 	@Override
 	protected List<ProjectModel> getProjectModels() {
 		if (projectModels.isEmpty()) {
 			List<RepositoryModel> repositories = getRepositoryModels();
-			List<ProjectModel> projects = GitBlit.self().getProjectModels(repositories, false);
+			List<ProjectModel> projects = app().projects().getProjectModels(repositories, false);
 			projectModels.addAll(projects);
 		}
 		return projectModels;
@@ -201,8 +204,8 @@ public class ProjectPage extends DashboardPage {
 		return null;
 	}
 
-	protected List<DropDownMenuItem> getProjectsMenu() {
-		List<DropDownMenuItem> menu = new ArrayList<DropDownMenuItem>();
+	protected List<MenuItem> getProjectsMenu() {
+		List<MenuItem> menu = new ArrayList<MenuItem>();
 		List<ProjectModel> projects = new ArrayList<ProjectModel>();
 		for (ProjectModel model : getProjectModels()) {
 			if (!model.isUserProject()) {
@@ -229,11 +232,11 @@ public class ProjectPage extends DashboardPage {
 		}
 
 		for (ProjectModel project : projects) {
-			menu.add(new DropDownMenuItem(project.getDisplayName(), "p", project.name));
+			menu.add(new ParameterMenuItem(project.getDisplayName(), "p", project.name));
 		}
 		if (showAllProjects) {
-			menu.add(new DropDownMenuItem());
-			menu.add(new DropDownMenuItem("all projects", null, null));
+			menu.add(new MenuDivider());
+			menu.add(new ParameterMenuItem("all projects"));
 		}
 		return menu;
 	}

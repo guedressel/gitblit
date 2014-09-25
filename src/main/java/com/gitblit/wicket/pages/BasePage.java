@@ -15,6 +15,8 @@
  */
 package com.gitblit.wicket.pages;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -31,6 +33,7 @@ import java.util.regex.Pattern;
 
 import javax.servlet.http.HttpServletRequest;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.wicket.Application;
 import org.apache.wicket.Page;
 import org.apache.wicket.PageParameters;
@@ -52,7 +55,6 @@ import com.gitblit.Constants.AccessPermission;
 import com.gitblit.Constants.AccessRestrictionType;
 import com.gitblit.Constants.AuthorizationControl;
 import com.gitblit.Constants.FederationStrategy;
-import com.gitblit.GitBlit;
 import com.gitblit.Keys;
 import com.gitblit.models.ProjectModel;
 import com.gitblit.models.TeamModel;
@@ -66,26 +68,38 @@ import com.gitblit.wicket.WicketUtils;
 
 public abstract class BasePage extends SessionPage {
 
-	private final Logger logger;
+	private transient Logger logger;
 
 	private transient TimeUtils timeUtils;
 
 	public BasePage() {
 		super();
-		logger = LoggerFactory.getLogger(getClass());
 		customizeHeader();
 	}
 
 	public BasePage(PageParameters params) {
 		super(params);
-		logger = LoggerFactory.getLogger(getClass());
 		customizeHeader();
 	}
 
+	protected Logger logger() {
+		if (logger == null) {
+			logger = LoggerFactory.getLogger(getClass());
+		}
+		return logger;
+	}
+
 	private void customizeHeader() {
-		if (GitBlit.getBoolean(Keys.web.useResponsiveLayout, true)) {
+		if (app().settings().getBoolean(Keys.web.useResponsiveLayout, true)) {
 			add(CSSPackageResource.getHeaderContribution("bootstrap/css/bootstrap-responsive.css"));
 		}
+		if (app().settings().getBoolean(Keys.web.hideHeader, false)) {
+			add(CSSPackageResource.getHeaderContribution("hideheader.css"));
+		}
+	}
+
+	protected String getContextUrl() {
+		return getRequest().getRelativePathPrefixToContextRoot();
 	}
 
 	protected String getCanonicalUrl() {
@@ -121,7 +135,7 @@ public abstract class BasePage extends SessionPage {
 
 	@Override
 	protected void onBeforeRender() {
-		if (GitBlit.isDebugMode()) {
+		if (app().isDebugMode()) {
 			// strip Wicket tags in debug mode for jQuery DOM traversal
 			Application.get().getMarkupSettings().setStripWicketTags(true);
 		}
@@ -130,7 +144,7 @@ public abstract class BasePage extends SessionPage {
 
 	@Override
 	protected void onAfterRender() {
-		if (GitBlit.isDebugMode()) {
+		if (app().isDebugMode()) {
 			// restore Wicket debug tags
 			Application.get().getMarkupSettings().setStripWicketTags(false);
 		}
@@ -141,8 +155,8 @@ public abstract class BasePage extends SessionPage {
 	protected void setHeaders(WebResponse response)	{
 		// set canonical link as http header for SEO (issue-304)
 		// https://support.google.com/webmasters/answer/139394?hl=en
-		response.setHeader("Link" ,MessageFormat.format("<{0}>; rel=\"canonical\"", getCanonicalUrl()));
-		int expires = GitBlit.getInteger(Keys.web.pageCacheExpires, 0);
+		response.setHeader("Link", MessageFormat.format("<{0}>; rel=\"canonical\"", getCanonicalUrl()));
+		int expires = app().settings().getInteger(Keys.web.pageCacheExpires, 0);
 		if (expires > 0) {
 			// pages are personalized for the authenticated user so they must be
 			// marked private to prohibit proxy servers from caching them
@@ -152,6 +166,9 @@ public abstract class BasePage extends SessionPage {
 			// use default Wicket caching behavior
 			super.setHeaders(response);
 		}
+
+		// XRF vulnerability. issue-500 / ticket-166
+		response.setHeader("X-Frame-Options", "SAMEORIGIN");
 	}
 
 	/**
@@ -164,15 +181,15 @@ public abstract class BasePage extends SessionPage {
 			CacheControl cacheControl = getClass().getAnnotation(CacheControl.class);
 			switch (cacheControl.value()) {
 			case ACTIVITY:
-				setLastModified(GitBlit.getLastActivityDate());
+				setLastModified(app().getLastActivityDate());
 				break;
 			case BOOT:
-				setLastModified(GitBlit.getBootDate());
+				setLastModified(app().getBootDate());
 				break;
 			case NONE:
 				break;
 			default:
-				logger.warn(getClass().getSimpleName() + ": unhandled LastModified type " + cacheControl.value());
+				logger().warn(getClass().getSimpleName() + ": unhandled LastModified type " + cacheControl.value());
 				break;
 			}
 		}
@@ -188,40 +205,44 @@ public abstract class BasePage extends SessionPage {
 			return;
 		}
 
-		if (when.before(GitBlit.getBootDate())) {
+		if (when.before(app().getBootDate())) {
 			// last-modified can not be before the Gitblit boot date
 			// this helps ensure that pages are properly refreshed after a
 			// server config change
-			when = GitBlit.getBootDate();
+			when = app().getBootDate();
 		}
 
-		int expires = GitBlit.getInteger(Keys.web.pageCacheExpires, 0);
+		int expires = app().settings().getInteger(Keys.web.pageCacheExpires, 0);
 		WebResponse response = (WebResponse) getResponse();
 		response.setLastModifiedTime(Time.valueOf(when));
 		response.setDateHeader("Expires", System.currentTimeMillis() + Duration.minutes(expires).getMilliseconds());
 	}
 
-	protected void setupPage(String repositoryName, String pageName) {
-		String siteName = GitBlit.getString(Keys.web.siteName, Constants.NAME);
+	protected String getPageTitle(String repositoryName) {
+		String siteName = app().settings().getString(Keys.web.siteName, Constants.NAME);
 		if (StringUtils.isEmpty(siteName)) {
 			siteName = Constants.NAME;
 		}
 		if (repositoryName != null && repositoryName.trim().length() > 0) {
-			add(new Label("title", repositoryName + " - " + siteName));
+			return repositoryName + " - " + siteName;
 		} else {
-			add(new Label("title", siteName));
+			return siteName;
 		}
+	}
 
-		String rootLinkUrl = GitBlit.getString(Keys.web.rootLink, urlFor(GitBlitWebApp.HOME_PAGE_CLASS, null).toString());
+	protected void setupPage(String repositoryName, String pageName) {
+		add(new Label("title", getPageTitle(repositoryName)));
+
+		String rootLinkUrl = app().settings().getString(Keys.web.rootLink, urlFor(GitBlitWebApp.get().getHomePage(), null).toString());
 		ExternalLink rootLink = new ExternalLink("rootLink", rootLinkUrl);
-		WicketUtils.setHtmlTooltip(rootLink, GitBlit.getString(Keys.web.siteName, Constants.NAME));
+		WicketUtils.setHtmlTooltip(rootLink, app().settings().getString(Keys.web.siteName, Constants.NAME));
 		add(rootLink);
 
 		// Feedback panel for info, warning, and non-fatal error messages
 		add(new FeedbackPanel("feedback"));
 
 		add(new Label("gbVersion", "v" + Constants.getVersion()));
-		if (GitBlit.getBoolean(Keys.web.aggressiveHeapManagement, false)) {
+		if (app().settings().getBoolean(Keys.web.aggressiveHeapManagement, false)) {
 			System.gc();
 		}
 	}
@@ -314,8 +335,8 @@ public abstract class BasePage extends SessionPage {
 	}
 
 	protected TimeZone getTimeZone() {
-		return GitBlit.getBoolean(Keys.web.useClientTimezone, false) ? GitBlitWebSession.get()
-				.getTimezone() : GitBlit.getTimezone();
+		return app().settings().getBoolean(Keys.web.useClientTimezone, false) ? GitBlitWebSession.get()
+				.getTimezone() : app().getTimezone();
 	}
 
 	protected String getServerName() {
@@ -326,7 +347,7 @@ public abstract class BasePage extends SessionPage {
 
 	protected List<ProjectModel> getProjectModels() {
 		final UserModel user = GitBlitWebSession.get().getUser();
-		List<ProjectModel> projects = GitBlit.self().getProjectModels(user, true);
+		List<ProjectModel> projects = app().projects().getProjectModels(user, true);
 		return projects;
 	}
 
@@ -339,7 +360,7 @@ public abstract class BasePage extends SessionPage {
 		String regex = WicketUtils.getRegEx(params);
 		String team = WicketUtils.getTeam(params);
 		int daysBack = params.getInt("db", 0);
-		int maxDaysBack = GitBlit.getInteger(Keys.web.activityDurationMaximum, 30);
+		int maxDaysBack = app().settings().getInteger(Keys.web.activityDurationMaximum, 30);
 
 		List<ProjectModel> availableModels = getProjectModels();
 		Set<ProjectModel> models = new HashSet<ProjectModel>();
@@ -363,7 +384,7 @@ public abstract class BasePage extends SessionPage {
 			// need TeamModels first
 			List<TeamModel> teamModels = new ArrayList<TeamModel>();
 			for (String name : teams) {
-				TeamModel teamModel = GitBlit.self().getTeamModel(name);
+				TeamModel teamModel = app().users().getTeamModel(name);
 				if (teamModel != null) {
 					teamModels.add(teamModel);
 				}
@@ -412,7 +433,7 @@ public abstract class BasePage extends SessionPage {
 	}
 
 	public void warn(String message, Throwable t) {
-		logger.warn(message, t);
+		logger().warn(message, t);
 	}
 
 	public void error(String message, boolean redirect) {
@@ -429,9 +450,9 @@ public abstract class BasePage extends SessionPage {
 
 	public void error(String message, Throwable t, Class<? extends Page> toPage, PageParameters params) {
 		if (t == null) {
-			logger.error(message  + " for " + GitBlitWebSession.get().getUsername());
+			logger().error(message  + " for " + GitBlitWebSession.get().getUsername());
 		} else {
-			logger.error(message  + " for " + GitBlitWebSession.get().getUsername(), t);
+			logger().error(message  + " for " + GitBlitWebSession.get().getUsername(), t);
 		}
 		if (toPage != null) {
 			GitBlitWebSession.get().cacheErrorMessage(message);
@@ -444,12 +465,34 @@ public abstract class BasePage extends SessionPage {
 	}
 
 	public void authenticationError(String message) {
-		logger.error(getRequest().getURL() + " for " + GitBlitWebSession.get().getUsername());
+		logger().error(getRequest().getURL() + " for " + GitBlitWebSession.get().getUsername());
 		if (!GitBlitWebSession.get().isLoggedIn()) {
 			// cache the request if we have not authenticated.
 			// the request will continue after authentication.
 			GitBlitWebSession.get().cacheRequest(getClass());
 		}
 		error(message, true);
+	}
+
+	protected String readResource(String resource) {
+		StringBuilder sb = new StringBuilder();
+		InputStream is = null;
+		try {
+			is = getClass().getResourceAsStream(resource);
+			List<String> lines = IOUtils.readLines(is);
+			for (String line : lines) {
+				sb.append(line).append('\n');
+			}
+		} catch (IOException e) {
+
+		} finally {
+			if (is != null) {
+				try {
+					is.close();
+				} catch (IOException e) {
+				}
+			}
+		}
+		return sb.toString();
 	}
 }
