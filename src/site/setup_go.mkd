@@ -8,7 +8,6 @@ Open `data/gitblit.properties` in your favorite text editor and make sure to rev
     - *server.storePassword* (do not enter *#* characters)
     **https** is strongly recommended because passwords are insecurely transmitted form your browser/git client using Basic authentication!
     - *git.packedGitLimit* (set larger than the size of your largest repository)
-    - *git.streamFileThreshold* (set larger than the size of your largest committed file)
 3. Execute `authority.cmd` or `java -cp gitblit.jar com.gitblit.authority.Launcher --baseFolder data` from a command-line
 **NOTE:** The Authority is a Swing GUI application.  Use of this tool is not required as Gitblit GO will startup and create SSL certificates itself, BUT use of this tool allows you to control the identification metadata used in the generated certificates.  Skipping this step will result in certificates with default metadata.
     1. fill out the fields in the *new certificate defaults* dialog
@@ -26,6 +25,10 @@ Open `data/gitblit.properties` in your favorite text editor and make sure to rev
 By default, Gitblit GO stores all data (users, settings, repositories, etc) in the `data` subfolder of your GO installation.  You may specify an external location for your data on the command-line by setting the *--baseFolder* argument.  If you relocate the data folder then you must supply the *--baseFolder* argument to both GO and the Certificate Authority.
 
 If you are deploying Gitblit to a *nix platform, you might consider moving the data folder out of the GO installation folder and then creating a symlink named "data" that points to your moved folder.
+
+#### Specifying baseFolder via GITBLIT_HOME
+
+You can specify `GITBLIT_HOME` either as an environment variable or as a `-DGITBLIT_HOME` JVM system property.
 
 ### Creating your own Self-Signed SSL Certificate
 Gitblit GO (and Gitblit Certificate Authority) automatically generates a Certificate Authority (CA) certificate and an ssl certificate signed by this CA certificate that is bound to *localhost*.
